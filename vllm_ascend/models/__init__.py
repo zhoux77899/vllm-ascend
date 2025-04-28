@@ -4,7 +4,7 @@ from vllm import ModelRegistry
 def register_model():
     ModelRegistry.register_model(
         "Qwen2VLForConditionalGeneration",
-        "vllm_ascend.models.qwen2_vl:CustomQwen2VLForConditionalGeneration")
+        "vllm_ascend.models.qwen2_vl:AscendQwen2VLForConditionalGeneration")
 
     ModelRegistry.register_model(
         "Qwen2_5_VLForConditionalGeneration",
