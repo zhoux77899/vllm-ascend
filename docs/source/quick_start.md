@@ -33,6 +33,15 @@ docker run --rm \
 
 The default workdir is `/workspace`, vLLM and vLLM Ascend code are placed in `/vllm-workspace` and installed in [development mode](https://setuptools.pypa.io/en/latest/userguide/development_mode.html)(`pip install -e`) to help developer immediately take place changes without requiring a new installation.
 
+## (Optional) Install MindIE Turbo
+
+Install MindIE Turbo for performance acceleration:
+
+```{code-block} bash
+   :substitutions:
+pip install mindie_turbo==|pip_mindie_turbo_version|
+```
+
 ## Usage
 
 You can use Modelscope mirror to speed up download:
@@ -131,3 +140,7 @@ INFO:     Application shutdown complete.
 Finally, you can exit container by using `ctrl-D`.
 ::::
 :::::
+
+### Performance enhancement related environment variables in Mindie Turbo
+
+Currently, some performance enhancement features in MindIE Turbo have certain scenario restrictions. For these features, environment variables are used to control whether to enable them. For related environment variables, see its [official documentation](https://www.hiascend.com/document/detail/zh/mindie/20RC1/AcceleratePlugin/turbodev/mindie-turbo-0010.html).

@@ -77,7 +77,8 @@ class NPUWorker(LocalOrDistributedWorkerBase):
         # Try to import mindie_turbo to accelerate vLLM inference.
         try_register_lib(
             "mindie_turbo",
-            "MindIE Turbo is installed. vLLM inference will be accelerated with MindIE Turbo."
+            "MindIE Turbo is installed. vLLM inference will be accelerated with MindIE Turbo.",
+            "MindIE Turbo is installed but unable to `import mindie_turbo`, skip MindIE Turbo acceleration."
         )
         # distribute related config
         self.parallel_config.rank = rank
