@@ -291,4 +291,5 @@ class W4A8DYNAMICQuantizer(VLLMAscendQuantizer):
 SUPPORT_ASCEND_QUANTIZER_TYPE = {
     "W8A8": W8A8Quantizer,
     "W8A8_DYNAMIC": W8A8DYNAMICQuantizer,
+    "W4A8_DYNAMIC": W4A8DYNAMICQuantizer
 }
