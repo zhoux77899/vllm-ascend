@@ -20,11 +20,9 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch_npu
-import torchair as tng  # type: ignore
-from vllm.distributed import GroupCoordinator, tensor_model_parallel_all_reduce
+from vllm.distributed import GroupCoordinator
 
 import vllm_ascend.envs as envs_ascend
-from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.distributed.parallel_state import get_ep_group
 from vllm_ascend.ops.fused_moe import select_experts
 from vllm_ascend.utils import dispose_tensor
@@ -508,7 +506,6 @@ class AscendW4A8DynamicFusedMoEMethod:
         ep_group = get_ep_group().device_group
         all_to_all_group_size = torch.distributed.get_world_size(ep_group)
         world_size = torch.distributed.get_world_size()
-        tp_size = world_size // all_to_all_group_size
         config = get_current_vllm_config()
         group_size = config.quant_config.quant_description.get(
             "group_size", 256)
