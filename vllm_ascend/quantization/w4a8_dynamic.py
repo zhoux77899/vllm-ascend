@@ -503,9 +503,6 @@ class AscendW4A8DynamicFusedMoEMethod:
                                 hidden_sizes: int,
                                 params_dtype: torch.dtype) -> Dict[str, Any]:
         param_dict = {}
-        ep_group = get_ep_group().device_group
-        all_to_all_group_size = torch.distributed.get_world_size(ep_group)
-        world_size = torch.distributed.get_world_size()
         config = get_current_vllm_config()
         group_size = config.quant_config.quant_description.get(
             "group_size", 256)
