@@ -18,6 +18,7 @@
 # Adapted from vllm/model_executor/models/qwen3_moe.py
 # This file is a part of the vllm-ascend project.
 
+import torch
 from torch import nn
 from vllm.config import VllmConfig
 from vllm.model_executor.layers.fused_moe.layer import FusedMoE
@@ -69,7 +70,7 @@ class CustomQwen3MoeForCausalLM(Qwen3MoeForCausalLM):
             self.model.make_empty_intermediate_tensors)
 
         # Set MoE hyperparameters
-        self.expert_weights = []
+        self.expert_weights: list[torch.Tensor] = []
 
         self.moe_layers: list[FusedMoE] = []
         example_layer = None
