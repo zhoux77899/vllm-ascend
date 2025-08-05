@@ -35,7 +35,6 @@ from vllm.model_executor.layers.fused_moe.config import \
     FusedMoEParallelConfig  # isort: skip
 from vllm.model_executor.layers.fused_moe.layer import (
     FusedMoE, UnquantizedFusedMoEMethod, determine_expert_map)
-from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.layers.quantization.base_config import \
     QuantizationConfig
 from vllm.platforms import current_platform
@@ -1355,8 +1354,8 @@ class AscendFusedMoE(FusedMoE):
                 is_prefill: bool,
                 enable_force_load_balance: bool = False,
                 top_k: Optional[int] = None,
-                shared_experts: Optional[bool] = None,
-                gate: Optional[ReplicatedLinear] = None,
+                shared_experts: Optional[Any] = None,
+                gate: Optional[Any] = None,
                 replace_allreduce: bool = False):
 
         assert self.quant_method is not None
@@ -1517,7 +1516,7 @@ class AscendFusedMoE(FusedMoE):
                      real_top_k: int,
                      is_prefill: bool,
                      enable_force_load_balance: bool = False,
-                     shared_experts: Optional[bool] = None,
+                     shared_experts: Optional[Any] = None,
                      mc2_mask: Optional[torch.Tensor] = None,
                      quantized_x_for_share: Optional[torch.Tensor] = None,
                      dynamic_scale_for_share: Optional[torch.Tensor] = None):
