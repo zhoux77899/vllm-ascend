@@ -1375,7 +1375,7 @@ class AscendFusedMoE(FusedMoE):
         from vllm_ascend.quantization.w8a8_dynamic import \
             AscendW8A8DynamicFusedMoEMethod
         if self.enable_multistream_moe:
-            if not self.rm_router_logits:
+            if not self.rm_router_logits and gate:
                 router_logits, _ = gate(hidden_states)
             if hasattr(self.quant_method, "quant_method") and \
                isinstance(self.quant_method.quant_method,
@@ -1432,7 +1432,7 @@ class AscendFusedMoE(FusedMoE):
                                 router_logits,
                                 (0, 0, 0, max_tokens_across_dp - num_tokens))
                 hidden_states = get_dp_group().all_gather(hidden_states, 0)
-                if self.rm_router_logits:
+                if self.rm_router_logits and gate:
                     router_logits, _ = gate(hidden_states)
                 else:
                     router_logits = get_dp_group().all_gather(router_logits, 0)
@@ -1442,7 +1442,7 @@ class AscendFusedMoE(FusedMoE):
                 ).dp_metadata.cu_tokens_across_dp_cpu
                 hidden_states = self.naive_multicast(hidden_states,
                                                      cu_tokens_across_dp_cpu)
-                if self.rm_router_logits:
+                if self.rm_router_logits and gate:
                     router_logits, _ = gate(hidden_states)
                 else:
                     router_logits = self.naive_multicast(
