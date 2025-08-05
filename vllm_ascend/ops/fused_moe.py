@@ -1577,16 +1577,16 @@ class AscendFusedMoE(FusedMoE):
 
 
 def ascend_moe_forward(
-        hidden_states: torch.Tensor,
-        router_logits: torch.Tensor,
-        real_top_k: int,
-        is_prefill: bool,
-        enable_force_load_balance: bool = False,
-        shared_experts: Optional[bool] = None,
-        mc2_mask: Optional[torch.Tensor] = None,
-        quantized_x_for_share: Optional[torch.Tensor] = None,
-        dynamic_scale_for_share: Optional[torch.Tensor] = None,
-        layer_name: str = "",
+    hidden_states: torch.Tensor,
+    router_logits: torch.Tensor,
+    real_top_k: int,
+    is_prefill: bool,
+    enable_force_load_balance: bool = False,
+    shared_experts: Optional[bool] = None,
+    mc2_mask: Optional[torch.Tensor] = None,
+    quantized_x_for_share: Optional[torch.Tensor] = None,
+    dynamic_scale_for_share: Optional[torch.Tensor] = None,
+    layer_name: str = "",
 ) -> torch.Tensor:
     forward_context = get_forward_context()
     self = forward_context.no_compile_layers[layer_name]
@@ -1606,16 +1606,16 @@ def ascend_moe_forward(
 
 
 def ascend_moe_forward_fake(
-        hidden_states: torch.Tensor,
-        router_logits: torch.Tensor,
-        real_top_k: int,
-        is_prefill: bool,
-        enable_force_load_balance: bool = False,
-        shared_experts: Optional[bool] = None,
-        mc2_mask: Optional[torch.Tensor] = None,
-        quantized_x_for_share: Optional[torch.Tensor] = None,
-        dynamic_scale_for_share: Optional[torch.Tensor] = None,
-        layer_name: str = "",
+    hidden_states: torch.Tensor,
+    router_logits: torch.Tensor,
+    real_top_k: int,
+    is_prefill: bool,
+    enable_force_load_balance: bool = False,
+    shared_experts: Optional[bool] = None,
+    mc2_mask: Optional[torch.Tensor] = None,
+    quantized_x_for_share: Optional[torch.Tensor] = None,
+    dynamic_scale_for_share: Optional[torch.Tensor] = None,
+    layer_name: str = "",
 ) -> torch.Tensor:
     return torch.empty_like(hidden_states)
 
