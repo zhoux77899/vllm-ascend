@@ -1447,7 +1447,7 @@ class AscendFusedMoE(FusedMoE):
                         router_logits, cu_tokens_across_dp_cpu)
 
         # Matrix multiply.
-        if current_platform.is_cpu():
+        if hidden_states.device.type.startswith("cpu"):
             e_hidden_states = self.forward_impl(
                 hidden_states,
                 router_logits,
