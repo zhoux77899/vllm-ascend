@@ -1447,18 +1447,31 @@ class AscendFusedMoE(FusedMoE):
                         router_logits, cu_tokens_across_dp_cpu)
 
         # Matrix multiply.
-        e_hidden_states = torch.ops.vllm.ascend_moe_forward(
-            hidden_states,
-            router_logits,
-            real_top_k,
-            is_prefill,
-            enable_force_load_balance,
-            shared_experts,
-            mc2_mask,
-            quantized_x_for_share,
-            dynamic_scale_for_share,
-            self.layer_name,
-        )
+        if current_platform.is_cpu():
+            e_hidden_states = self.forward_impl(
+                hidden_states,
+                router_logits,
+                real_top_k,
+                is_prefill,
+                enable_force_load_balance,
+                shared_experts,
+                mc2_mask,
+                quantized_x_for_share,
+                dynamic_scale_for_share,
+            )
+        else:
+            e_hidden_states = torch.ops.vllm.ascend_moe_forward(
+                hidden_states,
+                router_logits,
+                real_top_k,
+                is_prefill,
+                enable_force_load_balance,
+                shared_experts,
+                mc2_mask,
+                quantized_x_for_share,
+                dynamic_scale_for_share,
+                self.layer_name,
+            )
 
         if shared_experts:
             if isinstance(e_hidden_states, tuple):
