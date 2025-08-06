@@ -1215,8 +1215,6 @@ class AscendFusedMoE(FusedMoE):
 
         # For smuggling this layer into the fused moe custom op
         compilation_config = vllm_config.compilation_config
-        if prefix in compilation_config.static_forward_context:
-            raise ValueError("Duplicate layer name: {}".format(prefix))
         compilation_config.static_forward_context[prefix] = self
         self.layer_name = prefix
 

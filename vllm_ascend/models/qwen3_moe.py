@@ -44,7 +44,7 @@ from vllm.model_executor.models.utils import (
 from vllm_ascend.ops.fused_moe import AscendFusedMoE
 
 
-class CustomSparseMoeBlock(Qwen3MoeSparseMoeBlock):
+class CustomQwen3MoeSparseMoeBlock(Qwen3MoeSparseMoeBlock):
 
     def __init__(
         self,
@@ -95,9 +95,6 @@ class CustomSparseMoeBlock(Qwen3MoeSparseMoeBlock):
     ):
         if attn_metadata is None:
             attn_metadata = get_forward_context().attn_metadata
-        # when profile runs, force experts to load balanced tokens
-        # to avoid high memory consumption on a single rank.
-        enable_force_load_balance = get_forward_context().in_profile_run
         is_prefill = get_forward_context().with_prefill
 
         # router_logits: (num_tokens, n_experts)
@@ -108,7 +105,7 @@ class CustomSparseMoeBlock(Qwen3MoeSparseMoeBlock):
             router_logits=router_logits,
             is_prefill=is_prefill,
             top_k=self.top_k,
-            enable_force_load_balance=enable_force_load_balance,
+            enable_force_load_balance=False,
             shared_experts=None,
         )
 
@@ -151,22 +148,12 @@ class CustomQwen3MoeDecoderLayer(Qwen3MoeDecoderLayer):
         layer_idx = extract_layer_index(prefix)
         mlp_only_layers = ([] if not hasattr(config, "mlp_only_layers") else
                            config.mlp_only_layers)
-        use_aclgraph = (vllm_config is not None
-                        and vllm_config.compilation_config.level
-                        == CompilationLevel.PIECEWISE
-                        and not vllm_config.model_config.enforce_eager)
         if (layer_idx not in mlp_only_layers) and (
                 config.num_experts > 0 and
             (layer_idx + 1) % config.decoder_sparse_step == 0):
-            if not use_aclgraph:
-                # FIXME: custom sparse moe block doesn't work with aclgraph.
-                self.mlp = CustomSparseMoeBlock(config=config,
-                                                quant_config=quant_config,
-                                                prefix=f"{prefix}.mlp")
-            else:
-                self.mlp = Qwen3MoeSparseMoeBlock(config=config,
-                                                  quant_config=quant_config,
-                                                  prefix=f"{prefix}.mlp")
+            self.mlp = CustomQwen3MoeSparseMoeBlock(config=config,
+                                                    quant_config=quant_config,
+                                                    prefix=f"{prefix}.mlp")
         else:
             self.mlp = Qwen3MoeMLP(hidden_size=config.hidden_size,
                                    intermediate_size=config.intermediate_size,
