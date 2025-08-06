@@ -1447,7 +1447,8 @@ class AscendFusedMoE(FusedMoE):
                         router_logits, cu_tokens_across_dp_cpu)
 
         # Matrix multiply.
-        if hidden_states.device.type.startswith("cpu"):
+        # NOTE: CPU backend and shared_experts do not support `torch.ops`
+        if hidden_states.device.type.startswith("cpu") or shared_experts:
             e_hidden_states = self.forward_impl(
                 hidden_states,
                 router_logits,
@@ -1466,7 +1467,6 @@ class AscendFusedMoE(FusedMoE):
                 real_top_k,
                 is_prefill,
                 enable_force_load_balance,
-                shared_experts,
                 mc2_mask,
                 quantized_x_for_share,
                 dynamic_scale_for_share,
@@ -1593,7 +1593,6 @@ def ascend_moe_forward(
     real_top_k: int,
     is_prefill: bool,
     enable_force_load_balance: bool = False,
-    shared_experts: Optional[bool] = None,
     mc2_mask: Optional[torch.Tensor] = None,
     quantized_x_for_share: Optional[torch.Tensor] = None,
     dynamic_scale_for_share: Optional[torch.Tensor] = None,
@@ -1604,15 +1603,15 @@ def ascend_moe_forward(
     assert self.quant_method is not None
 
     return self.forward_impl(
-        hidden_states,
-        router_logits,
-        real_top_k,
-        is_prefill,
-        enable_force_load_balance,
-        shared_experts,
-        mc2_mask,
-        quantized_x_for_share,
-        dynamic_scale_for_share,
+        hidden_states=hidden_states,
+        router_logits=router_logits,
+        real_top_k=real_top_k,
+        is_prefill=is_prefill,
+        enable_force_load_balance=enable_force_load_balance,
+        shared_experts=None,
+        mc2_mask=mc2_mask,
+        quantized_x_for_share=quantized_x_for_share,
+        dynamic_scale_for_share=dynamic_scale_for_share,
     )
 
 
@@ -1622,7 +1621,6 @@ def ascend_moe_forward_fake(
     real_top_k: int,
     is_prefill: bool,
     enable_force_load_balance: bool = False,
-    shared_experts: Optional[bool] = None,
     mc2_mask: Optional[torch.Tensor] = None,
     quantized_x_for_share: Optional[torch.Tensor] = None,
     dynamic_scale_for_share: Optional[torch.Tensor] = None,
