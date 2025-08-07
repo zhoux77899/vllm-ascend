@@ -158,11 +158,10 @@ class CustomQwen3MoeDecoderLayer(Qwen3MoeDecoderLayer):
         layer_idx = extract_layer_index(prefix)
         mlp_only_layers = ([] if not hasattr(config, "mlp_only_layers") else
                            config.mlp_only_layers)
-        ep_enabled = vllm_config is not None and vllm_config.parallel_config.enable_expert_parallel
         if (layer_idx not in mlp_only_layers) and (
                 config.num_experts > 0 and
             (layer_idx + 1) % config.decoder_sparse_step == 0):
-            if quant_config is None and ep_enabled:
+            if self.unquantized_ep_enabled:
                 # FIXME: ascend unquanitzed allgather_ep doesn't work with aclgraph.
                 self.mlp = Qwen3MoeSparseMoeBlock(config=config,
                                                   quant_config=quant_config,
@@ -229,7 +228,7 @@ class CustomQwen3MoeDecoderLayer(Qwen3MoeDecoderLayer):
         hidden_states, residual = self.post_attention_layernorm(
             hidden_states, residual)
 
-        if not self.use_aclgraph:
+        if not self.unquantized_ep_enabled:
             hidden_states = self.mlp(
                 hidden_states, _metadata_for_padding=_metadata_for_padding)
         else:
@@ -335,6 +334,10 @@ class CustomQwen3MoeForCausalLM(Qwen3MoeForCausalLM):
         quant_config = vllm_config.quant_config
         self.config = config
         self.quant_config = quant_config
+
+        ep_enabled = vllm_config is not None and vllm_config.parallel_config.enable_expert_parallel
+        self.unquantized_ep_enabled = quant_config is None and ep_enabled        
+
         self.model = CustomQwen3MoeModel(vllm_config=vllm_config,
                                          prefix=maybe_prefix(prefix, "model"))
         self.lm_head = ParallelLMHead(config.vocab_size,
