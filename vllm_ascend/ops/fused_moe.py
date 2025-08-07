@@ -1392,8 +1392,7 @@ class AscendFusedMoE(FusedMoE):
 
         mc2_mask = forward_context.mc2_mask
 
-        enable_sp = 
-        is not None and _metadata_for_padding.not_dummy_and_is_prefill
+        enable_sp = _metadata_for_padding is not None and _metadata_for_padding.not_dummy_and_is_prefill
         tp_size = get_tensor_model_parallel_world_size()
         if enable_sp:
             tp_rank = get_tensor_model_parallel_rank()
