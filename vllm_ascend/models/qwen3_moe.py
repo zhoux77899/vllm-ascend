@@ -24,7 +24,7 @@ from torch import nn
 from transformers import PretrainedConfig
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, VllmConfig
-from vllm.distributed import get_tensor_model_parallel_world_size
+from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
 from vllm.distributed.parallel_state import (get_dp_group, get_ep_group,
                                              get_tp_group)
 from vllm.forward_context import get_forward_context
@@ -168,9 +168,10 @@ class CustomQwen3MoeDecoderLayer(Qwen3MoeDecoderLayer):
                                                   quant_config=quant_config,
                                                   prefix=f"{prefix}.mlp")
             else:
-                self.mlp = CustomQwen3MoeSparseMoeBlock(config=config,
-                                                        quant_config=quant_config,
-                                                        prefix=f"{prefix}.mlp")
+                self.mlp = CustomQwen3MoeSparseMoeBlock(
+                    config=config,
+                    quant_config=quant_config,
+                    prefix=f"{prefix}.mlp")
         else:
             self.mlp = Qwen3MoeMLP(hidden_size=config.hidden_size,
                                    intermediate_size=config.intermediate_size,

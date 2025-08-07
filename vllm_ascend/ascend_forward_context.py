@@ -76,8 +76,8 @@ def set_ascend_forward_context(
         is_qwen3_moe = hasattr(
             vllm_config.model_config.hf_config, "model_type"
         ) and vllm_config.model_config.hf_config.model_type == "qwen3_moe"
-        fused_moe_state = _get_fused_moe_state(ep_size, with_prefill,
-                                               is_deepseek_v3_r1 or is_qwen3_moe)
+        fused_moe_state = _get_fused_moe_state(
+            ep_size, with_prefill, is_deepseek_v3_r1 or is_qwen3_moe)
         forward_context.fused_moe_state = fused_moe_state
         forward_context.in_profile_run = in_profile_run
 
