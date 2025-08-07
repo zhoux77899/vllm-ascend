@@ -336,7 +336,7 @@ class CustomQwen3MoeForCausalLM(Qwen3MoeForCausalLM):
         self.quant_config = quant_config
 
         ep_enabled = vllm_config is not None and vllm_config.parallel_config.enable_expert_parallel
-        self.unquantized_ep_enabled = quant_config is None and ep_enabled        
+        self.unquantized_ep_enabled = quant_config is None and ep_enabled
 
         self.model = CustomQwen3MoeModel(vllm_config=vllm_config,
                                          prefix=maybe_prefix(prefix, "model"))
