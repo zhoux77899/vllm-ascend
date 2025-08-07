@@ -102,7 +102,7 @@ class AscendQuantConfig(QuantizationConfig):
         elif isinstance(layer, FusedMoE):
             if self.is_layer_skipped_ascend(prefix,
                                             self.packed_modules_mapping):
-                return AscendUnquantizedFusedMoEMethod()
+                return AscendUnquantizedFusedMoEMethod(layer.moe)
             return AscendFusedMoEMethod(self, prefix,
                                         self.packed_modules_mapping)
         elif isinstance(layer, VocabParallelEmbedding):
@@ -302,6 +302,9 @@ class AscendFusedMoEMethod(FusedMoEMethodBase):
             param = torch.nn.Parameter(param_value, requires_grad=False)
             layer.register_parameter(param_key, param)
             set_weight_attrs(param, extra_weight_attrs)
+            if "weight_scale_second" in param_key or "weight_offset_second" in param_key:
+                setattr(param, "quant_method",
+                        FusedMoeWeightScaleSupported.GROUP.value)
 
     def apply(
         self,

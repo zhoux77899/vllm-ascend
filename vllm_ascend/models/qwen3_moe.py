@@ -1,6 +1,7 @@
 # Copyright (c) 2025 Huawei Technologies Co., Ltd. All Rights Reserved.
+# Copyright 2024 The Qwen team.
 # Copyright 2023 The vLLM team.
-#
+# Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved. Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,7 +16,8 @@
 # limitations under the License.
 # Adapted from vllm/model_executor/models/qwen3_moe.py
 # This file is a part of the vllm-ascend project.
-from typing import Optional
+
+from typing import Optional, Union
 
 import torch
 from torch import nn
@@ -26,22 +28,28 @@ from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.distributed.parallel_state import (get_dp_group, get_ep_group,
                                              get_tp_group)
 from vllm.forward_context import get_forward_context
+from vllm.model_executor.layers.fused_moe.layer import FusedMoE
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
+from vllm.model_executor.models.interfaces import (MixtureOfExperts,
+                                                   SupportsLoRA, SupportsPP)
 from vllm.model_executor.models.qwen3_moe import (Qwen3MoeAttention,
                                                   Qwen3MoeDecoderLayer,
                                                   Qwen3MoeForCausalLM,
                                                   Qwen3MoeMLP, Qwen3MoeModel,
                                                   Qwen3MoeSparseMoeBlock)
 from vllm.model_executor.models.utils import (
-    extract_layer_index, make_empty_intermediate_tensors_factory, make_layers,
-    maybe_prefix)
+    PPMissingLayer, extract_layer_index,
+    make_empty_intermediate_tensors_factory, make_layers, maybe_prefix)
+from vllm.sequence import IntermediateTensors
 
 from vllm_ascend.ops.fused_moe import AscendFusedMoE
+from vllm_ascend.ops.sequence_parallel import (MetadataForPadding,
+                                               init_metadata_for_sp)
 
 
 class CustomQwen3MoeSparseMoeBlock(Qwen3MoeSparseMoeBlock):
@@ -92,6 +100,7 @@ class CustomQwen3MoeSparseMoeBlock(Qwen3MoeSparseMoeBlock):
         self,
         hidden_states,
         attn_metadata=None,
+        _metadata_for_padding: Optional[MetadataForPadding] = None,
     ):
         if attn_metadata is None:
             attn_metadata = get_forward_context().attn_metadata
@@ -107,6 +116,7 @@ class CustomQwen3MoeSparseMoeBlock(Qwen3MoeSparseMoeBlock):
             top_k=self.top_k,
             enable_force_load_balance=False,
             shared_experts=None,
+            _metadata_for_padding=_metadata_for_padding,
         )
 
         return hidden_states
@@ -165,6 +175,60 @@ class CustomQwen3MoeDecoderLayer(Qwen3MoeDecoderLayer):
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
                                                 eps=config.rms_norm_eps)
 
+        self.enable_sequence_parallelism = (
+            vllm_config.compilation_config.pass_config.
+            enable_sequence_parallelism if vllm_config is not None else False)
+
+    def forward(
+        self,
+        positions: torch.Tensor,
+        hidden_states: torch.Tensor,
+        residual: Optional[torch.Tensor],
+        _metadata_for_padding: Optional[MetadataForPadding] = None,
+    ) -> torch.Tensor:
+
+        # To prevent precision issues during the decoder phase when only prefilling enables SP
+        if not self.enable_sequence_parallelism:
+            self.self_attn.o_proj.reduce_results = True
+        else:
+            self.self_attn.o_proj.reduce_results = not _metadata_for_padding.not_dummy_and_is_prefill if _metadata_for_padding is not None else True
+
+        # Self Attention
+        if residual is None:
+            residual = hidden_states
+            if _metadata_for_padding and _metadata_for_padding.not_dummy_and_is_prefill:
+                residual = _metadata_for_padding.padding_slice(residual)
+
+            hidden_states = self.input_layernorm(hidden_states)
+        else:
+            hidden_states, residual = self.input_layernorm(
+                hidden_states, residual)
+
+            if _metadata_for_padding and _metadata_for_padding.not_dummy_and_is_prefill:
+                hidden_states = _metadata_for_padding.allgather_unpadding_aligned(
+                    hidden_states)
+
+        hidden_states = self.self_attn(
+            positions=positions,
+            hidden_states=hidden_states,
+        )
+
+        if _metadata_for_padding and _metadata_for_padding.not_dummy_and_is_prefill:
+            hidden_states = _metadata_for_padding.padding_aligned_reduce_scatter(
+                hidden_states)
+
+        # Fully Connected
+        hidden_states, residual = self.post_attention_layernorm(
+            hidden_states, residual)
+
+        if not self.use_aclgraph:
+            hidden_states = self.mlp(
+                hidden_states, _metadata_for_padding=_metadata_for_padding)
+        else:
+            hidden_states = self.mlp(hidden_states)
+
+        return hidden_states, residual
+
 
 @support_torch_compile
 class CustomQwen3MoeModel(Qwen3MoeModel):
@@ -199,6 +263,45 @@ class CustomQwen3MoeModel(Qwen3MoeModel):
             make_empty_intermediate_tensors_factory(
                 ["hidden_states", "residual"], config.hidden_size))
 
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        intermediate_tensors: Optional[IntermediateTensors] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        _metadata_for_padding: Optional[MetadataForPadding] = None,
+    ) -> Union[torch.Tensor, IntermediateTensors]:
+        if get_pp_group().is_first_rank:
+            if inputs_embeds is not None:
+                hidden_states = inputs_embeds
+            else:
+                hidden_states = self.get_input_embeddings(input_ids)
+            residual = None
+        else:
+            assert intermediate_tensors is not None
+            hidden_states = intermediate_tensors["hidden_states"]
+            residual = intermediate_tensors["residual"]
+        for i in range(self.start_layer, self.end_layer):
+            layer = self.layers[i]
+            hidden_states, residual = layer(
+                positions,
+                hidden_states,
+                residual,
+                _metadata_for_padding=_metadata_for_padding)
+        if not get_pp_group().is_last_rank:
+            return IntermediateTensors({
+                "hidden_states": hidden_states,
+                "residual": residual
+            })
+
+        hidden_states, _ = self.norm(hidden_states, residual)
+
+        if _metadata_for_padding and _metadata_for_padding.not_dummy_and_is_prefill:
+            hidden_states = _metadata_for_padding.allgather_unpadding_aligned(
+                hidden_states)
+
+        return hidden_states
+
 
 class CustomQwen3MoeForCausalLM(Qwen3MoeForCausalLM):
     packed_modules_mapping = {
@@ -217,6 +320,9 @@ class CustomQwen3MoeForCausalLM(Qwen3MoeForCausalLM):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         nn.Module.__init__(self)
+        SupportsPP.__init__(self)
+        SupportsLoRA.__init__(self)
+        MixtureOfExperts.__init__(self)
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
         self.config = config
@@ -225,9 +331,45 @@ class CustomQwen3MoeForCausalLM(Qwen3MoeForCausalLM):
                                          prefix=maybe_prefix(prefix, "model"))
         self.lm_head = ParallelLMHead(config.vocab_size,
                                       config.hidden_size,
-                                      quant_config=quant_config)
+                                      quant_config=quant_config,
+                                      prefix=maybe_prefix(prefix, "lm_head"))
         if self.config.tie_word_embeddings:
             self.lm_head.weight = self.model.embed_tokens.weight
         self.logits_processor = LogitsProcessor(config.vocab_size)
         self.make_empty_intermediate_tensors = (
             self.model.make_empty_intermediate_tensors)
+
+        self.enable_sequence_parallelism = vllm_config.compilation_config.pass_config.enable_sequence_parallelism
+        # Set MoE hyperparameters
+        self.expert_weights: list[torch.Tensor] = []
+
+        self.moe_layers: list[FusedMoE] = []
+        example_layer = None
+        for layer in self.model.layers:
+            if isinstance(layer, PPMissingLayer):
+                continue
+
+            assert isinstance(layer, Qwen3MoeDecoderLayer)
+            if isinstance(layer.mlp, Qwen3MoeSparseMoeBlock):
+                example_layer = layer.mlp
+                self.moe_layers.append(layer.mlp.experts)
+
+        if example_layer is None:
+            raise RuntimeError("No Qwen3MoE layer found in the model.layers.")
+
+        self.num_moe_layers = len(self.moe_layers)
+        self.num_expert_groups = 1
+        self.num_shared_experts = 0
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        intermediate_tensors: Optional[IntermediateTensors] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+    ) -> Union[torch.Tensor, IntermediateTensors]:
+        _metadata_for_padding = init_metadata_for_sp(
+            input_ids, self.enable_sequence_parallelism)
+        hidden_states = self.model(input_ids, positions, intermediate_tensors,
+                                   inputs_embeds, _metadata_for_padding)
+        return hidden_states

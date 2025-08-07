@@ -209,3 +209,52 @@ def test_models_distributed_Qwen3_W4A8DYNAMIC():
             quantization="ascend",
     ) as vllm_model:
         vllm_model.generate_greedy(example_prompts, max_tokens)
+
+
+@patch.dict(os.environ, {"VLLM_ASCEND_MLA_PA": "1"})
+def test_models_distributed_DeepSeek_W4A8DYNAMIC():
+    prompts = [
+        "Hello, my name is",
+    ]
+    max_tokens = 5
+    with VllmRunner(
+            snapshot_download("vllm-ascend/DeepSeek-R1-w4a8-pruning"),
+            dtype="auto",
+            tensor_parallel_size=2,
+            quantization="ascend",
+            enforce_eager=True,
+            enable_expert_parallel=True,
+            additional_config={
+                "torchair_graph_config": {
+                    "enabled": False,
+                },
+                "ascend_scheduler_config": {
+                    "enabled": True,
+                }
+            },
+    ) as vllm_model:
+        vllm_model.generate_greedy(prompts, max_tokens)
+
+
+def test_sp_for_qwen3_moe() -> None:
+    example_prompts = [
+        "Hello, my name is",
+    ]
+    sampling_params = SamplingParams(max_tokens=5,
+                                     temperature=0.0,
+                                     top_k=50,
+                                     top_p=0.9)
+
+    with VllmRunner(
+            snapshot_download("Qwen/Qwen3-30B-A3B"),
+            dtype="auto",
+            tensor_parallel_size=2,
+            distributed_executor_backend="mp",
+            compilation_config={
+                "pass_config": {
+                    "enable_sequence_parallelism": True
+                }
+            },
+            enable_expert_parallel=True,
+    ) as vllm_model:
+        vllm_model.generate(example_prompts, sampling_params)
