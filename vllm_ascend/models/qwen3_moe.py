@@ -158,12 +158,19 @@ class CustomQwen3MoeDecoderLayer(Qwen3MoeDecoderLayer):
         layer_idx = extract_layer_index(prefix)
         mlp_only_layers = ([] if not hasattr(config, "mlp_only_layers") else
                            config.mlp_only_layers)
+        ep_enabled = vllm_config is not None and vllm_config.parallel_config.enable_expert_parallel
         if (layer_idx not in mlp_only_layers) and (
                 config.num_experts > 0 and
             (layer_idx + 1) % config.decoder_sparse_step == 0):
-            self.mlp = CustomQwen3MoeSparseMoeBlock(config=config,
-                                                    quant_config=quant_config,
-                                                    prefix=f"{prefix}.mlp")
+            if quant_config is None and ep_enabled:
+                # FIXME: ascend unquanitzed allgather_ep doesn't work with aclgraph.
+                self.mlp = Qwen3MoeSparseMoeBlock(config=config,
+                                                  quant_config=quant_config,
+                                                  prefix=f"{prefix}.mlp")
+            else:
+                self.mlp = CustomQwen3MoeSparseMoeBlock(config=config,
+                                                        quant_config=quant_config,
+                                                        prefix=f"{prefix}.mlp")
         else:
             self.mlp = Qwen3MoeMLP(hidden_size=config.hidden_size,
                                    intermediate_size=config.intermediate_size,

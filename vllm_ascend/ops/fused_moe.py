@@ -1355,7 +1355,7 @@ class AscendFusedMoE(FusedMoE):
                 top_k: Optional[int] = None,
                 shared_experts: Optional[Any] = None,
                 gate: Optional[Any] = None,
-                replace_allreduce: bool = False):
+                replace_allreduce: bool = False,
                 _metadata_for_padding: Optional[MetadataForPadding] = None):
 
         assert self.quant_method is not None
