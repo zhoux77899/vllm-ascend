@@ -246,6 +246,9 @@ class CustomQwen3MoeModel(Qwen3MoeModel):
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
 
+        ep_enabled = vllm_config is not None and vllm_config.parallel_config.enable_expert_parallel
+        self.unquantized_ep_enabled = quant_config is None and ep_enabled
+
         parallel_config = vllm_config.parallel_config
         self.num_redundant_experts = parallel_config.num_redundant_experts
         self.padding_idx = config.pad_token_id
@@ -334,9 +337,6 @@ class CustomQwen3MoeForCausalLM(Qwen3MoeForCausalLM):
         quant_config = vllm_config.quant_config
         self.config = config
         self.quant_config = quant_config
-
-        ep_enabled = vllm_config is not None and vllm_config.parallel_config.enable_expert_parallel
-        self.unquantized_ep_enabled = quant_config is None and ep_enabled
 
         self.model = CustomQwen3MoeModel(vllm_config=vllm_config,
                                          prefix=maybe_prefix(prefix, "model"))
