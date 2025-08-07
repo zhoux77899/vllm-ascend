@@ -158,6 +158,8 @@ class CustomQwen3MoeDecoderLayer(Qwen3MoeDecoderLayer):
         layer_idx = extract_layer_index(prefix)
         mlp_only_layers = ([] if not hasattr(config, "mlp_only_layers") else
                            config.mlp_only_layers)
+        ep_enabled = vllm_config is not None and vllm_config.parallel_config.enable_expert_parallel
+        self.unquantized_ep_enabled = quant_config is None and ep_enabled
         if (layer_idx not in mlp_only_layers) and (
                 config.num_experts > 0 and
             (layer_idx + 1) % config.decoder_sparse_step == 0):
@@ -245,9 +247,6 @@ class CustomQwen3MoeModel(Qwen3MoeModel):
         config = vllm_config.model_config.hf_config
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
-
-        ep_enabled = vllm_config is not None and vllm_config.parallel_config.enable_expert_parallel
-        self.unquantized_ep_enabled = quant_config is None and ep_enabled
 
         parallel_config = vllm_config.parallel_config
         self.num_redundant_experts = parallel_config.num_redundant_experts
