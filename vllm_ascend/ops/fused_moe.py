@@ -1283,6 +1283,7 @@ class AscendFusedMoE(FusedMoE):
             # TODO (bnell): this needs to be fixed for quantized types.
             in_dtype=params_dtype,
             quant_config=quant_config)
+        self.quant_config = quant_config
 
         if quant_config is None:
             self.quant_method = AscendUnquantizedFusedMoEMethod(self.moe)
