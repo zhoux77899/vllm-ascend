@@ -163,7 +163,8 @@ env_variables: Dict[str, Callable[[], Any]] = {
     #   0: default, gmm + swiglu + dynamic_quant
     #   1: enable grouped_matmul_swiglu_quant
     "VLLM_ASCEND_ENABLE_GROUPED_MATMUL_SWIGLU_QUANT":
-    lambda: bool(int(os.getenv("VLLM_ASCEND_ENABLE_GROUPED_MATMUL_SWIGLU_QUANT", "0"))),
+    lambda: bool(
+        int(os.getenv("VLLM_ASCEND_ENABLE_GROUPED_MATMUL_SWIGLU_QUANT", "0"))),
 }
 
 # end-env-vars-definition
