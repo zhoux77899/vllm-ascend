@@ -169,6 +169,7 @@ def apply_mlp(hidden_states: torch.Tensor,
     hidden_states, swiglu_out_scale, _ = torch_npu.npu_grouped_matmul_swiglu_quant(
         x=hidden_states,
         weight=w1,
+        bias=bias1,
         group_list=group_list,
         weight_scale=w1_scale,
         x_scale=pertoken_scale)
