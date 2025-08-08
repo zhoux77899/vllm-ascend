@@ -22,14 +22,10 @@ class TestAscendW8A8FusedMoEMethod(TestBase):
     @patch("torch_npu.npu_dynamic_quant")
     @patch("torch_npu.npu_moe_finalize_routing")
     @patch("torch_npu.npu_moe_init_routing")
-    def test_fused_experts_with_all2all(self,
-                                        mock_moe_init_routing,
-                                        mock_moe_finalize_routing,
-                                        mock_dynamic_quant,
-                                        mock_grouped_matmul_swiglu_quant,
-                                        mock_grouped_matmul,
-                                        mock_moe_re_routing,
-                                        mock_all_to_all_single):
+    def test_fused_experts_with_all2all(
+            self, mock_moe_init_routing, mock_moe_finalize_routing,
+            mock_dynamic_quant, mock_grouped_matmul_swiglu_quant,
+            mock_grouped_matmul, mock_moe_re_routing, mock_all_to_all_single):
         expert_map = MagicMock()
         ep_group = MagicMock()
         placeholder_int8 = torch.randint(0,
