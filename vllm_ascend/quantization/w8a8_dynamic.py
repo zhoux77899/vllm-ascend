@@ -173,24 +173,23 @@ def apply_mlp(hidden_states: torch.Tensor,
             group_list=group_list,
             weight_scale=w1_scale,
             x_scale=pertoken_scale)
-
-    # gmm1: gate_up_proj
-    hidden_states = torch_npu.npu_grouped_matmul(
-        x=[hidden_states],
-        weight=[w1],
-        scale=[w1_scale],
-        bias=bias1,
-        per_token_scale=[pertoken_scale],
-        split_item=2,
-        group_list_type=group_list_type,
-        group_type=0,
-        group_list=group_list,
-        output_dtype=_output_dtype)[0]
-
-    # act_fn: swiglu
-    hidden_states = torch_npu.npu_swiglu(hidden_states)
-    hidden_states, swiglu_out_scale = torch_npu.npu_dynamic_quant(
-        hidden_states)
+    else:
+        # gmm1: gate_up_proj
+        hidden_states = torch_npu.npu_grouped_matmul(
+            x=[hidden_states],
+            weight=[w1],
+            scale=[w1_scale],
+            bias=bias1,
+            per_token_scale=[pertoken_scale],
+            split_item=2,
+            group_list_type=group_list_type,
+            group_type=0,
+            group_list=group_list,
+            output_dtype=_output_dtype)[0]
+        # act_fn: swiglu
+        hidden_states = torch_npu.npu_swiglu(hidden_states)
+        hidden_states, swiglu_out_scale = torch_npu.npu_dynamic_quant(
+            hidden_states)
 
     # gmm2: down_proj
     hidden_states = torch_npu.npu_grouped_matmul(
