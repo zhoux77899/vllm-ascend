@@ -21,8 +21,6 @@
 Run `pytest tests/e2e/multicard/test_qwen3_moe.py`.
 """
 
-import os
-
 from modelscope import snapshot_download  # type: ignore
 
 from tests.e2e.conftest import VllmRunner
@@ -60,7 +58,6 @@ def test_models_distributed_Qwen3_MOE_TP2_WITH_EP():
 
 
 def test_models_distributed_Qwen3_MOE_W8A8():
-    os.environ["VLLM_ASCEND_ENABLE_GROUPED_MATMUL_SWIGLU_QUANT"] = "1"
     example_prompts = [
         "Hello, my name is",
     ]

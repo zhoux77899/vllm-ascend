@@ -165,31 +165,13 @@ def apply_mlp(hidden_states: torch.Tensor,
         # TODO w4a8 scene: dynamic acquisition of dtype in the future
         _output_dtype = torch.bfloat16
 
-    if envs.VLLM_ASCEND_ENABLE_GROUPED_MATMUL_SWIGLU_QUANT:
-        # gmm1: gate_up_proj & act_fn: swiglu
-        hidden_states, swiglu_out_scale, _ = torch_npu.npu_grouped_matmul_swiglu_quant(
-            x=hidden_states,
-            weight=w1,
-            group_list=group_list,
-            weight_scale=w1_scale,
-            x_scale=pertoken_scale)
-    else:
-        # gmm1: gate_up_proj
-        hidden_states = torch_npu.npu_grouped_matmul(
-            x=[hidden_states],
-            weight=[w1],
-            scale=[w1_scale],
-            bias=bias1,
-            per_token_scale=[pertoken_scale],
-            split_item=2,
-            group_list_type=group_list_type,
-            group_type=0,
-            group_list=group_list,
-            output_dtype=_output_dtype)[0]
-        # act_fn: swiglu
-        hidden_states = torch_npu.npu_swiglu(hidden_states)
-        hidden_states, swiglu_out_scale = torch_npu.npu_dynamic_quant(
-            hidden_states)
+    # gmm1: gate_up_proj & act_fn: swiglu
+    hidden_states, swiglu_out_scale, _ = torch_npu.npu_grouped_matmul_swiglu_quant(
+        x=hidden_states,
+        weight=w1,
+        group_list=group_list,
+        weight_scale=w1_scale,
+        x_scale=pertoken_scale)
 
     # gmm2: down_proj
     hidden_states = torch_npu.npu_grouped_matmul(
@@ -992,13 +974,10 @@ class AscendW8A8DynamicFusedMoEMethod:
         elif fused_moe_state in [
                 FusedMoEState.AllGather, FusedMoEState.NaiveMulticast
         ]:
-            if envs.VLLM_ASCEND_ENABLE_GROUPED_MATMUL_SWIGLU_QUANT:
-                w1_scale = layer.w13_weight_scale_fp32
-            else:
-                w1_scale = layer.w13_weight_scale
+            torch_npu.npu_format_cast_(layer.w13_weight, ACL_FORMAT_FRACTAL_NZ)
             return fused_experts(hidden_states=x,
                                  w1=layer.w13_weight,
-                                 w1_scale=w1_scale,
+                                 w1_scale=layer.w13_weight_scale_fp32,
                                  w2=layer.w2_weight,
                                  w2_scale=layer.w2_weight_scale,
                                  topk_weights=topk_weights,
@@ -1031,8 +1010,6 @@ class AscendW8A8DynamicFusedMoEMethod:
                 1, 2).contiguous()
             layer.w2_weight.data = layer.w2_weight.data.transpose(
                 1, 2).contiguous()
-        if envs.VLLM_ASCEND_ENABLE_GROUPED_MATMUL_SWIGLU_QUANT:
-            torch_npu.npu_format_cast_(layer.w13_weight, ACL_FORMAT_FRACTAL_NZ)
         if envs.VLLM_ENABLE_FUSED_EXPERTS_ALLGATHER_EP:
             torch_npu.npu_format_cast_(layer.w2_weight, ACL_FORMAT_FRACTAL_NZ)
         layer.w13_weight_scale.data = layer.w13_weight_scale.data.view(
