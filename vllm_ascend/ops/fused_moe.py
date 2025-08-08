@@ -38,6 +38,8 @@ from vllm.model_executor.layers.fused_moe.layer import (
 from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.layers.quantization.base_config import \
     QuantizationConfig
+from vllm.platforms import current_platform
+from vllm.utils import direct_register_custom_op
 
 import vllm_ascend.envs as envs_ascend
 from vllm_ascend.ascend_config import get_ascend_config
@@ -1168,6 +1170,10 @@ class AscendFusedMoE(FusedMoE):
                       if dp_size is not None else get_dp_group().world_size),
             vllm_parallel_config=vllm_config.parallel_config,
         )
+        
+        compilation_config = vllm_config.compilation_config
+        compilation_config.static_forward_context[prefix] = self
+        self.layer_name = prefix
 
         self.top_k = top_k
         self.num_experts = num_experts
@@ -1235,6 +1241,7 @@ class AscendFusedMoE(FusedMoE):
             # TODO (bnell): this needs to be fixed for quantized types.
             in_dtype=params_dtype,
         )
+        self.quant_config = quant_config
 
         if quant_config is None:
             self.quant_method = AscendUnquantizedFusedMoEMethod(moe)
@@ -1395,34 +1402,32 @@ class AscendFusedMoE(FusedMoE):
             router_logits = get_dp_group().all_gather(router_logits, 0)
 
         # Matrix multiply.
-        e_hidden_states = self.quant_method.apply(
-            layer=self,
-            x=hidden_states,
-            router_logits=router_logits,
-            top_k=real_top_k,
-            renormalize=self.renormalize,
-            use_grouped_topk=self.use_grouped_topk,
-            global_num_experts=self.global_num_experts,
-            expert_map=self.expert_map,
-            topk_group=self.topk_group,
-            num_expert_group=self.num_expert_group,
-            custom_routing_function=self.custom_routing_function,
-            scoring_func=self.scoring_func,
-            e_score_correction_bias=self.e_score_correction_bias,
-            is_prefill=is_prefill,
-            enable_force_load_balance=enable_force_load_balance,
-            log2phy=self.log2phy,
-            global_redundant_expert_num=self.global_redundant_expert_num,
-            shared_experts=(shared_experts if self.torchair_graph_enabled
-                            and self.enable_multistream_moe and not is_prefill
-                            else None),
-            hidden_states_for_share=hidden_states_for_share,
-            dynamic_scale_for_share=dynamic_scale_for_share,
-            mc2_mask=mc2_mask,
-            token_dispatcher=self.token_dispatcher,
-            prefix=self.prefix,
-            running_in_super_kernel=running_in_super_kernel,
-        )
+        if hidden_states.device.type.startswith("cpu") or shared_experts:
+            e_hidden_states = self.forward_impl(
+                hidden_states,
+                router_logits,
+                real_top_k,
+                is_prefill,
+                enable_force_load_balance,
+                shared_experts,
+                hidden_states_for_share,
+                dynamic_scale_for_share,
+                mc2_mask,
+                running_in_super_kernel,
+            )
+        else:
+            e_hidden_states = torch.ops.vllm.ascend_moe_forward(
+                hidden_states,
+                router_logits,
+                real_top_k,
+                is_prefill,
+                enable_force_load_balance,
+                hidden_states_for_share,
+                dynamic_scale_for_share,
+                mc2_mask,
+                running_in_super_kernel,
+                self.layer_name
+            )
 
         if isinstance(e_hidden_states, tuple):
             if len(e_hidden_states) == 4:
@@ -1462,6 +1467,46 @@ class AscendFusedMoE(FusedMoE):
             return final_hidden_states, shared_hidden_states
         else:
             return final_hidden_states
+
+    def forward_impl(self,
+                     hidden_states: torch.Tensor,
+                     router_logits: torch.Tensor,
+                     real_top_k: int,
+                     is_prefill: bool,
+                     enable_force_load_balance: bool = False,
+                     shared_experts: Optional[Any] = None,
+                     hidden_states_for_share: Optional[torch.Tensor] = None,
+                     dynamic_scale_for_share: Optional[torch.Tensor] = None,
+                     mc2_mask: Optional[torch.Tensor] = None,
+                     running_in_super_kernel: bool = False):
+        return self.quant_method.apply(
+            layer=self,
+            x=hidden_states,
+            router_logits=router_logits,
+            top_k=real_top_k,
+            renormalize=self.renormalize,
+            use_grouped_topk=self.use_grouped_topk,
+            global_num_experts=self.global_num_experts,
+            expert_map=self.expert_map,
+            topk_group=self.topk_group,
+            num_expert_group=self.num_expert_group,
+            custom_routing_function=self.custom_routing_function,
+            scoring_func=self.scoring_func,
+            e_score_correction_bias=self.e_score_correction_bias,
+            is_prefill=is_prefill,
+            enable_force_load_balance=enable_force_load_balance,
+            log2phy=self.log2phy,
+            global_redundant_expert_num=self.global_redundant_expert_num,
+            shared_experts=(shared_experts if self.torchair_graph_enabled
+                            and self.enable_multistream_moe and not is_prefill
+                            else None),
+            hidden_states_for_share=hidden_states_for_share,
+            dynamic_scale_for_share=dynamic_scale_for_share,
+            mc2_mask=mc2_mask,
+            token_dispatcher=self.token_dispatcher,
+            prefix=self.prefix,
+            running_in_super_kernel=running_in_super_kernel,
+        )
 
     def update_map(self, new_expert_map):
         self.expert_map = new_expert_map
@@ -1582,3 +1627,57 @@ class AscendSparseMoeBlock(nn.Module):
             _metadata_for_padding=_metadata_for_padding)
 
         return hidden_states
+
+
+def ascend_moe_forward(
+    hidden_states: torch.Tensor,
+    router_logits: torch.Tensor,
+    real_top_k: int,
+    is_prefill: bool,
+    enable_force_load_balance: bool = False,
+    hidden_states_for_share: Optional[torch.Tensor] = None,
+    dynamic_scale_for_share: Optional[torch.Tensor] = None,
+    mc2_mask: Optional[torch.Tensor] = None,
+    running_in_super_kernel: bool = False,
+    layer_name: str = "",
+) -> torch.Tensor:
+    forward_context = get_forward_context()
+    self = forward_context.no_compile_layers[layer_name]
+    assert self.quant_method is not None
+
+    return self.forward_impl(
+        hidden_states=hidden_states,
+        router_logits=router_logits,
+        real_top_k=real_top_k,
+        is_prefill=is_prefill,
+        enable_force_load_balance=enable_force_load_balance,
+        shared_experts=None,
+        hidden_states_for_share=hidden_states_for_share,
+        dynamic_scale_for_share=dynamic_scale_for_share,
+        mc2_mask=mc2_mask,
+        running_in_super_kernel=running_in_super_kernel,
+    )
+
+
+def ascend_moe_forward_fake(
+    hidden_states: torch.Tensor,
+    router_logits: torch.Tensor,
+    real_top_k: int,
+    is_prefill: bool,
+    enable_force_load_balance: bool = False,
+    hidden_states_for_share: Optional[torch.Tensor] = None,
+    dynamic_scale_for_share: Optional[torch.Tensor] = None,
+    mc2_mask: Optional[torch.Tensor] = None,
+    running_in_super_kernel: bool = False,
+    layer_name: str = "",
+) -> torch.Tensor:
+    return torch.empty_like(hidden_states)
+
+
+direct_register_custom_op(
+    op_name="ascend_moe_forward",
+    op_func=ascend_moe_forward,
+    mutates_args=[],
+    fake_impl=ascend_moe_forward_fake,
+    dispatch_key=current_platform.dispatch_key,
+)
