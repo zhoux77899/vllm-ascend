@@ -562,7 +562,6 @@ def fused_experts_with_allgather(hidden_states: torch.Tensor,
         ],
         quant_mode=-1,
         row_idx_type=1)
-    group_list_type = 1
 
     sorted_topk_weight = torch.index_select(topk_weights.view(-1), 0,
                                             expanded_x_idx)
