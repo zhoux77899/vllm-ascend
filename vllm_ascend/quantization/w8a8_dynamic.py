@@ -170,7 +170,8 @@ def apply_mlp(hidden_states: torch.Tensor,
         x=hidden_states,
         weight=w1,
         bias=bias1,
-        group_list=group_list if group_list_type == 0 else group_list.cumsum(dim=0),
+        group_list=group_list if group_list_type == 0 else group_list.cumsum(
+            dim=0),
         weight_scale=w1_scale,
         x_scale=pertoken_scale)
 
