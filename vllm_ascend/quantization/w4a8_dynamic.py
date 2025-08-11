@@ -31,6 +31,7 @@ from vllm_ascend.ops.fused_moe import select_experts
 from vllm_ascend.quantization.w8a8_dynamic import (fused_experts_with_all2all,
                                                    fused_experts_with_mc2)
 from vllm_ascend.torchair.utils import npu_stream_switch, npu_wait_tensor
+from vllm_ascend.utils import ACL_FORMAT_FRACTAL_NZ
 
 
 class AscendW4A8DynamicLinearMethod:
@@ -364,6 +365,7 @@ class AscendW4A8DynamicFusedMoEMethod:
                 1, 2).contiguous()
             layer.w2_weight.data = layer.w2_weight.data.transpose(
                 1, 2).contiguous()
+        torch_npu.npu_format_cast_(layer.w13_weight, ACL_FORMAT_FRACTAL_NZ)
         layer.w13_weight_scale.data = layer.w13_weight_scale.data.transpose(
             1, 2).contiguous()
         layer.w2_weight_scale.data = layer.w2_weight_scale.data.transpose(

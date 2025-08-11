@@ -170,7 +170,7 @@ def apply_mlp(hidden_states: torch.Tensor,
         x=hidden_states,
         weight=w1,
         bias=bias1,
-        group_list=group_list,
+        group_list=group_list if group_list_type == 0 else group_list.cumsum(dim=0),
         weight_scale=w1_scale,
         x_scale=pertoken_scale)
 
@@ -571,27 +571,12 @@ def fused_experts_with_allgather(hidden_states: torch.Tensor,
                               dtype=torch.bfloat16,
                               device="npu")
 
-    hidden_states = torch_npu.npu_grouped_matmul(
-        x=[hidden_states],
-        weight=[w1],
-        split_item=3,
-        group_list_type=group_list_type,
-        group_type=0,
-        group_list=expert_tokens,
-        output_dtype=torch.int32)[0]
-
-    # act_fn: swiglu
-    hidden_states, pertoken_scale = torch_npu.npu_dequant_swiglu_quant(
+    hidden_states, pertoken_scale, _ = torch_npu.npu_grouped_matmul_swiglu_quant(
         x=hidden_states,
-        weight_scale=w1_scale.to(torch.float32),
-        activation_scale=pertoken_scale,
-        bias=None,
-        quant_scale=None,
-        quant_offset=None,
-        group_index=expert_tokens,
-        activate_left=True,
-        quant_mode=1,
-    )
+        weight=w1,
+        group_list=expert_tokens.cumsum(dim=0),
+        weight_scale=w1_scale,
+        x_scale=pertoken_scale)
 
     final_hidden_states = torch_npu.npu_grouped_matmul_finalize_routing(
         hidden_states,
@@ -946,7 +931,7 @@ class AscendW8A8DynamicFusedMoEMethod:
             return fused_experts_with_allgather(
                 hidden_states=x,
                 w1=layer.w13_weight,
-                w1_scale=layer.w13_weight_scale,
+                w1_scale=layer.w13_weight_scale_fp32,
                 w2=layer.w2_weight,
                 w2_scale=layer.w2_weight_scale,
                 topk_weights=topk_weights,
@@ -975,7 +960,6 @@ class AscendW8A8DynamicFusedMoEMethod:
         elif fused_moe_state in [
                 FusedMoEState.AllGather, FusedMoEState.NaiveMulticast
         ]:
-            torch_npu.npu_format_cast_(layer.w13_weight, ACL_FORMAT_FRACTAL_NZ)
             return fused_experts(hidden_states=x,
                                  w1=layer.w13_weight,
                                  w1_scale=layer.w13_weight_scale_fp32,
@@ -1011,6 +995,7 @@ class AscendW8A8DynamicFusedMoEMethod:
                 1, 2).contiguous()
             layer.w2_weight.data = layer.w2_weight.data.transpose(
                 1, 2).contiguous()
+        torch_npu.npu_format_cast_(layer.w13_weight, ACL_FORMAT_FRACTAL_NZ)
         if envs.VLLM_ENABLE_FUSED_EXPERTS_ALLGATHER_EP:
             torch_npu.npu_format_cast_(layer.w2_weight, ACL_FORMAT_FRACTAL_NZ)
         layer.w13_weight_scale.data = layer.w13_weight_scale.data.view(
