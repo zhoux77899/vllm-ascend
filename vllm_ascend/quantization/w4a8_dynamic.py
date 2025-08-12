@@ -201,10 +201,6 @@ def apply_mlp(hidden_states: torch.Tensor,
     return hidden_states
 
 
-ascend_w8a8_dynamic.apply_mlp_decode = apply_mlp_decode
-ascend_w8a8_dynamic.apply_mlp = apply_mlp
-
-
 class AscendW4A8DynamicLinearMethod:
     """Linear method for Ascend W4A8_DYNAMIC
     """
@@ -461,6 +457,9 @@ class AscendW4A8DynamicFusedMoEMethod:
         # currently it is only activated when doing profile runs.
         if enable_force_load_balance:
             topk_ids = torch.randint_like(topk_ids, 0, global_num_experts)
+
+        ascend_w8a8_dynamic.apply_mlp_decode = apply_mlp_decode
+        ascend_w8a8_dynamic.apply_mlp = apply_mlp
 
         topk_weights = topk_weights.to(x.dtype)
         if fused_moe_state == FusedMoEState.MC2:
