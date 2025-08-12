@@ -69,9 +69,10 @@ class TestAscendW4A8DynamicFusedMoEMethod(TestBase):
         self.assertEqual(param_dict["w2_weight_scale_second"].shape,
                          (8, 14, 2))
 
+    @patch('torch_npu.npu_format_cast_')
     @patch('torch_npu.npu_quantize')
     @patch('torch.Tensor.npu')
-    def test_process_weights_after_loading(self, mock_npu, mock_npu_quantize):
+    def test_process_weights_after_loading(self, mock_npu, mock_npu_quantize, mock_npu_format_cast):
         layer = torch.nn.Module()
         layer.w13_weight = torch.nn.Parameter(torch.zeros((8, 8, 14),
                                                           dtype=torch.int8),
@@ -100,6 +101,7 @@ class TestAscendW4A8DynamicFusedMoEMethod(TestBase):
 
         mock_npu.return_value = torch.Tensor()
         mock_npu_quantize.return_value = torch.Tensor()
+        mock_npu_format_cast.return_value = torch.Tensor()
         self.quant_method.process_weights_after_loading(layer)
         self.assertTrue(hasattr(layer, "w13_scale_bias"))
         self.assertEqual(layer.w13_scale_bias.data.shape, (8, 8))

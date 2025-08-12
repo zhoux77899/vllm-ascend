@@ -72,28 +72,14 @@ def apply_mlp_decode(hidden_states: torch.Tensor,
     else:
         pertoken_scale = dynamic_scale
 
-    # gmm1: gate_up_proj
-    hidden_states = torch_npu.npu_grouped_matmul(
-        x=[hidden_states],
-        weight=[w1],
-        split_item=3,
-        group_list_type=group_list_type,
-        group_type=0,
-        group_list=group_list,
-        output_dtype=torch.int32)[0]
-
-    # act_fn: swiglu
-    hidden_states, swiglu_out_scale = torch_npu.npu_dequant_swiglu_quant(
+    # gmm1: gate_up_proj & act_fn: swiglu
+    hidden_states, swiglu_out_scale, _ = torch_npu.npu_grouped_matmul_swiglu_quant(
         x=hidden_states,
+        weight=w1,
+        group_list=group_list if group_list_type == 0 else group_list.cumsum(
+            dim=0),
         weight_scale=w1_scale,
-        activation_scale=pertoken_scale,
-        bias=None,
-        quant_scale=None,
-        quant_offset=None,
-        group_index=group_list,
-        activate_left=True,
-        quant_mode=1,
-    )
+        x_scale=pertoken_scale)
 
     # gmm2: down_proj
     hidden_states = torch_npu.npu_grouped_matmul(
@@ -978,7 +964,7 @@ class AscendW8A8DynamicFusedMoEMethod:
             return fused_experts_with_all2all(
                 hidden_states=x,
                 w1=layer.w13_weight,
-                w1_scale=layer.w13_weight_scale,
+                w1_scale=layer.w13_weight_scale_fp32,
                 w2=layer.w2_weight,
                 w2_scale=layer.w2_weight_scale,
                 topk_weights=topk_weights,
