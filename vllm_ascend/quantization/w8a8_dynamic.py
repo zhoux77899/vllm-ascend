@@ -39,7 +39,9 @@ def cumsum_group_list(group_list: torch.Tensor,
                       active_num: int = 0,
                       expert_num: int = 0) -> torch.Tensor:
     if group_list_type not in [0, 1, 2]:
-        raise ValueError(f"group_list_type should be in [0, 1, 2], but received {group_list_type}")
+        raise ValueError(
+            f"group_list_type should be in [0, 1, 2], but received {group_list_type}"
+        )
 
     if group_list_type == 0:
         return group_list
