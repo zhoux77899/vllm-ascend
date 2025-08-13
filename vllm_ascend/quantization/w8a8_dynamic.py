@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch_npu
+from torch.nn.functional import pad
 from vllm.distributed import GroupCoordinator, get_ep_group
 from vllm.forward_context import get_forward_context
 
@@ -31,6 +32,32 @@ from vllm_ascend.ops.fused_moe import select_experts
 from vllm_ascend.torchair.utils import npu_stream_switch, npu_wait_tensor
 from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_NZ, AscendSocVersion,
                                dispose_tensor, get_ascend_soc_version)
+
+
+def cumsum_group_list(group_list: torch.Tensor,
+                      group_list_type: int,
+                      active_num: int = 0,
+                      expert_num: int = 0) -> torch.Tensor:
+    if group_list_type not in [0, 1, 2]:
+        raise ValueError(f"group_list_type should be in [0, 1, 2], but received {group_list_type}")
+
+    if group_list_type == 0:
+        return group_list
+    if group_list_type == 1:
+        return group_list.cumsum(dim=0)
+
+    experts = pad(group_list[:, 0], (1, 0))
+    tokens = pad(group_list[:, 1].cumsum(dim=0), (1, 0))
+    cumsum_group_list = torch.full(size=(expert_num, ),
+                                   fill_value=active_num,
+                                   dtype=group_list.dtype,
+                                   device=group_list.device)
+    
+    for i, (start, end) in enumerate(zip(experts[:-1], experts[1:])):
+        if end > start:
+            cumsum_group_list[start:end] = tokens[i]
+
+    return cumsum_group_list
 
 
 def apply_mlp_decode(hidden_states: torch.Tensor,
@@ -76,8 +103,7 @@ def apply_mlp_decode(hidden_states: torch.Tensor,
     hidden_states, swiglu_out_scale, _ = torch_npu.npu_grouped_matmul_swiglu_quant(
         x=hidden_states,
         weight=w1,
-        group_list=group_list if group_list_type == 0 else group_list.cumsum(
-            dim=0),
+        group_list=cumsum_group_list(group_list, group_list_type),
         weight_scale=w1_scale,
         x_scale=pertoken_scale)
 
@@ -156,8 +182,7 @@ def apply_mlp(hidden_states: torch.Tensor,
         x=hidden_states,
         weight=w1,
         bias=bias1,
-        group_list=group_list if group_list_type == 0 else group_list.cumsum(
-            dim=0),
+        group_list=cumsum_group_list(group_list, group_list_type),
         weight_scale=w1_scale,
         x_scale=pertoken_scale)
 
@@ -560,7 +585,10 @@ def fused_experts_with_allgather(hidden_states: torch.Tensor,
     hidden_states, pertoken_scale, _ = torch_npu.npu_grouped_matmul_swiglu_quant(
         x=hidden_states,
         weight=w1,
-        group_list=expert_tokens.cumsum(dim=0),
+        group_list=cumsum_group_list(group_list=expert_tokens,
+                                     group_list_type=1,
+                                     active_num=num_tokens * top_k,
+                                     expert_num=global_num_experts),
         weight_scale=w1_scale,
         x_scale=pertoken_scale)
 
