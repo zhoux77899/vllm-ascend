@@ -54,7 +54,7 @@ def cumsum_group_list(group_list: torch.Tensor,
                                    fill_value=active_num,
                                    dtype=group_list.dtype,
                                    device=group_list.device)
-    
+
     for i, (start, end) in enumerate(zip(experts[:-1], experts[1:])):
         if end > start:
             cumsum_group_list[start:end] = tokens[i]
