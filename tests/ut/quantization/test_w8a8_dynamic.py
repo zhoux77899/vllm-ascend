@@ -60,8 +60,8 @@ class TestAscendW8A8FusedMoEMethod(TestBase):
             placeholder_ones,
             self.placeholder,
         )
-        mock_zeros.return_value = torch.zeros((self.num_tokens, self.hidden_size),
-                                              dtype=torch.bfloat16)
+        mock_zeros.return_value = torch.zeros(
+            (self.num_tokens, self.hidden_size), dtype=torch.bfloat16)
         mock_grouped_matmul_swiglu_quant.return_value = (
             placeholder_int8,
             self.placeholder,
