@@ -199,7 +199,7 @@ def apply_mlp(hidden_states: torch.Tensor,
             group_list = torch.cat(
                 [group_list[:1], torch.diff(group_list, dim=0)])
             group_list_type = 1
-        bias1 = w1_scale_bias
+        bias1 = [w1_scale_bias] if is_torchair else w1_scale_bias
         bias2 = [w2_scale_bias]
         # TODO w4a8 scene: dynamic acquisition of dtype in the future
         _output_dtype = torch.bfloat16
@@ -219,7 +219,7 @@ def apply_mlp(hidden_states: torch.Tensor,
             x=[hidden_states],
             weight=[w1],
             scale=[w1_scale.to(w2_scale.dtype)],
-            bias=[bias1] if isinstance(bias1, torch.Tensor) else bias1,
+            bias=bias1,
             per_token_scale=[pertoken_scale],
             split_item=2,
             group_list_type=group_list_type,
