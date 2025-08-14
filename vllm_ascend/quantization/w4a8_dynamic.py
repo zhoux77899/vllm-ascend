@@ -42,7 +42,8 @@ def apply_mlp_decode(hidden_states: torch.Tensor,
                      w2_scale: torch.Tensor,
                      group_list: torch.Tensor,
                      dynamic_scale: torch.Tensor = None,
-                     group_list_type: int = 1) -> torch.Tensor:
+                     group_list_type: int = 1,
+                     is_torchair: bool = False) -> torch.Tensor:
     """
     apply MLP: gate_up_proj -> swiglu -> down_proj
     Args:
@@ -120,7 +121,8 @@ def apply_mlp(hidden_states: torch.Tensor,
               dynamic_scale: torch.Tensor = None,
               group_list_type: int = 1,
               w1_scale_bias: torch.Tensor = None,
-              w2_scale_bias: torch.Tensor = None) -> torch.Tensor:
+              w2_scale_bias: torch.Tensor = None,
+              is_torchair: bool = False) -> torch.Tensor:
     """
     apply MLP: gate_up_proj -> swiglu -> down_proj
 
