@@ -218,7 +218,7 @@ def apply_mlp(hidden_states: torch.Tensor,
         hidden_states = torch_npu.npu_grouped_matmul(
             x=[hidden_states],
             weight=[w1],
-            scale=[w1_scale],
+            scale=[w1_scale.to(w2_scale.dtype)],
             bias=[bias1],
             per_token_scale=[pertoken_scale],
             split_item=2,
@@ -654,7 +654,7 @@ def fused_experts_with_allgather(hidden_states: torch.Tensor,
             output_dtype=torch.int32)[0]
         hidden_states, pertoken_scale = torch_npu.npu_dequant_swiglu_quant(
             x=hidden_states,
-            weight_scale=w1_scale.to(torch.float32),
+            weight_scale=w1_scale,
             activation_scale=pertoken_scale,
             bias=None,
             quant_scale=None,
