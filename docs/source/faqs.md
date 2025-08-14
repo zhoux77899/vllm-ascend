@@ -10,7 +10,7 @@
 
 ### 1. What devices are currently supported?
 
-Currently, **ONLY** Atlas A2 series(Ascend-cann-kernels-910b)，Atlas A2 series(Atlas-A3-cann-kernels) and Atlas 300I(Ascend-cann-kernels-310p) series are supported:
+Currently, **ONLY** Atlas A2 series(Ascend-cann-kernels-910b)，Atlas A3 series(Atlas-A3-cann-kernels) and Atlas 300I(Ascend-cann-kernels-310p) series are supported:
 
 - Atlas A2 Training series (Atlas 800T A2, Atlas 900 A2 PoD, Atlas 200T A2 Box16, Atlas 300T A2)
 - Atlas 800I A2 Inference series (Atlas 800I A2)
@@ -34,6 +34,33 @@ If you are in China, you can use `daocloud` to accelerate your downloading:
 # Replace with tag you want to pull
 TAG=v0.7.3rc2
 docker pull m.daocloud.io/quay.io/ascend/vllm-ascend:$TAG
+```
+
+#### Load Docker Images for offline environment
+If you want to use container image for offline environments (no internet connection), you need to download container image in a environment with internet access:
+
+**Exporting Docker images:**
+
+```{code-block} bash
+   :substitutions:
+# Pull the image on a machine with internet access
+TAG=|vllm_ascend_version|
+docker pull quay.io/ascend/vllm-ascend:$TAG
+
+# Export the image to a tar file and compress to tar.gz
+docker save quay.io/ascend/vllm-ascend:$TAG | gzip > vllm-ascend-$TAG.tar.gz
+```
+
+**Importing Docker images in environment without internet access:**
+
+```{code-block} bash
+   :substitutions:
+# Transfer the tar/tar.gz file to the offline environment and load it
+TAG=|vllm_ascend_version|
+docker load -i vllm-ascend-$TAG.tar.gz
+
+# Verify the image is loaded
+docker images | grep vllm-ascend
 ```
 
 ### 3. What models does vllm-ascend supports?
@@ -161,10 +188,10 @@ for output in outputs:
 2. Set the following enveriments parameters:
 
 ```bash
-export LCCL_DETERMINISTIC = 1
-export HCCL_DETERMINISTIC = 1
-export ATB_MATMUL_SHUFFLE_K_ENABLE = 0
-export ATB_LLM_LCOC_ENABLE = 0
+export LCCL_DETERMINISTIC=1
+export HCCL_DETERMINISTIC=true
+export ATB_MATMUL_SHUFFLE_K_ENABLE=0
+export ATB_LLM_LCOC_ENABLE=0
 ```
 
 ### 19. How to fix the error "ImportError: Please install vllm[audio] for audio support" for Qwen2.5-Omni model？

@@ -43,6 +43,7 @@ from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.ascend_forward_context import FusedMoEState
 from vllm_ascend.distributed.communication_op import \
     data_parallel_reduce_scatter
+from vllm_ascend.distributed.moe_comm_method import MoECommMethod
 from vllm_ascend.distributed.parallel_state import get_mc2_group
 from vllm_ascend.ops.expert_load_balancer import ExpertLoadBalancer
 from vllm_ascend.ops.moe_dispatcher.token_dispatcher import (
@@ -55,6 +56,62 @@ from vllm_ascend.utils import (AscendSocVersion, dispose_tensor,
                                get_rm_router_logits_state, is_310p)
 
 MOE_ALL2ALL_BUFFER: bool = envs_ascend.MOE_ALL2ALL_BUFFER
+
+
+def unified_fused_experts(
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    activation: str = "silu",
+    apply_router_weight_on_input: bool = False,
+    use_int8_w8a8: bool = False,
+    use_int4_w4a8: bool = False,
+    global_num_experts: Optional[int] = None,
+    expert_map: Optional[torch.Tensor] = None,
+    w1_scale: Optional[torch.Tensor] = None,
+    w2_scale: Optional[torch.Tensor] = None,
+    w1_scale_bias: torch.Tensor = None,
+    w2_scale_bias: torch.Tensor = None,
+    moe_comm_method: Optional[MoECommMethod] = None,
+    # For TorchAir graph
+    is_torchair: bool = False,
+    # For Cube/Vector parallel
+    shared_experts: Optional[Any] = None,
+    quantized_x_for_share: Optional[Any] = None,
+    dynamic_scale_for_share: Optional[Any] = None,
+    # For load balance
+    log2phy: torch.Tensor = None,
+    global_redundant_expert_num: int = 0,
+) -> torch.Tensor:
+    # Check constraints
+    assert hidden_states.shape[1] == w1.shape[2], (
+        f"Hidden size mismatch {hidden_states.shape[1]} != {w1.shape[2]}")
+
+    assert topk_weights.shape == topk_ids.shape, "topk shape mismatch"
+    assert hidden_states.is_contiguous(), "Hidden_states must be contiguous"
+    assert w1.stride(-1) == 1, "Stride of last dimension must be 1"
+    assert w2.stride(-1) == 1, "Stride of last dimension must be 1"
+    assert hidden_states.dtype in [
+        torch.float32, torch.float16, torch.bfloat16
+    ]
+    assert moe_comm_method is not None, "Missing communication context"
+
+    num_experts = w1.shape[0]
+
+    permuted_hidden_states, expert_tokens, group_list_type = torch.ops.vllm.moe_comm_pre_process(
+        hidden_states, topk_ids, topk_weights, expert_map, num_experts)
+    mlp_output = apply_mlp(
+        permuted_hidden_states,
+        w1,
+        w2,
+        expert_tokens,
+        group_list_type=group_list_type,
+    )
+    torch.ops.vllm.moe_comm_post_process(mlp_output, hidden_states)
+
+    return hidden_states
 
 
 def process_topk_ids(topk_ids: torch.Tensor, expert_num: int, ep_size: int,
@@ -1201,6 +1258,7 @@ class AscendFusedMoE(FusedMoE):
             scoring_func=scoring_func,
             e_score_correction_bias=e_score_correction_bias,
             activation=activation,
+            apply_router_weight_on_input=apply_router_weight_on_input,
         )
         AscendFusedMoE.moe_counter += 1
         self.moe_instance_id = AscendFusedMoE.moe_counter
@@ -1268,6 +1326,7 @@ class AscendFusedMoE(FusedMoE):
         self.enable_multistream_moe = \
             ascend_config.torchair_graph_config.enable_multistream_moe and \
             self.torchair_graph_enabled
+        self.enable_shared_expert_dp = ascend_config.enable_shared_expert_dp
 
         if self.scoring_func != "softmax" and not self.use_grouped_topk:
             raise ValueError("Only softmax scoring function is supported for "
@@ -1408,22 +1467,24 @@ class AscendFusedMoE(FusedMoE):
             else:
                 # TODO: Determine if we can remove the padding
                 padding_size = tp_size
-            if num_tokens < padding_size:
+            if num_tokens < padding_size and not self.enable_shared_expert_dp:
                 hidden_states = nn.functional.pad(
                     hidden_states, (0, 0, 0, padding_size - num_tokens))
                 router_logits = nn.functional.pad(
                     router_logits, (0, 0, 0, padding_size - num_tokens))
             if tp_size > 1:
-                chunk_hidden_states = torch.tensor_split(hidden_states,
-                                                         tp_size,
-                                                         dim=0)
-                chunk_router_logits = torch.tensor_split(router_logits,
-                                                         tp_size,
-                                                         dim=0)
-                chunk_mc2_mask = torch.tensor_split(mc2_mask, tp_size, dim=0)
                 tp_rank = get_tensor_model_parallel_rank()
-                hidden_states = chunk_hidden_states[tp_rank]
-                router_logits = chunk_router_logits[tp_rank]
+                if not self.enable_shared_expert_dp:
+                    chunk_hidden_states = torch.tensor_split(hidden_states,
+                                                             tp_size,
+                                                             dim=0)
+                    chunk_router_logits = torch.tensor_split(router_logits,
+                                                             tp_size,
+                                                             dim=0)
+                    hidden_states = chunk_hidden_states[tp_rank]
+                    router_logits = chunk_router_logits[tp_rank]
+
+                chunk_mc2_mask = torch.tensor_split(mc2_mask, tp_size, dim=0)
                 mc2_mask = chunk_mc2_mask[tp_rank]
 
         if self.dp_size > 1:
@@ -1490,7 +1551,7 @@ class AscendFusedMoE(FusedMoE):
         if (fused_moe_state not in [
                 FusedMoEState.AllGather, FusedMoEState.AllGatherEP,
                 FusedMoEState.NaiveMulticast
-        ] and not replace_allreduce):
+        ] and not replace_allreduce and not self.enable_shared_expert_dp):
             if tp_size > 1:
                 dist.all_gather(list(chunk_hidden_states), e_hidden_states,
                                 self.tp_group)
@@ -1500,7 +1561,7 @@ class AscendFusedMoE(FusedMoE):
                 final_hidden_states = e_hidden_states
             if num_tokens < padding_size:
                 final_hidden_states = final_hidden_states[:num_tokens]
-        elif self.dp_size > 1:
+        elif self.dp_size > 1 and not self.enable_shared_expert_dp:
             if fused_moe_state == FusedMoEState.NaiveMulticast:
                 start = 0 if self.dp_rank == 0 else cu_tokens_across_dp_cpu[
                     self.dp_rank - 1]
