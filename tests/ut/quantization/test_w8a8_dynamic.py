@@ -3,10 +3,9 @@ from unittest.mock import MagicMock, patch
 import torch
 
 from tests.ut.base import TestBase
-from vllm_ascend.quantization.w8a8_dynamic import (fused_experts_with_allgather,
-                                                   fused_experts_with_all2all,
-                                                   fused_experts_with_mc2,
-                                                   fused_experts)
+from vllm_ascend.quantization.w8a8_dynamic import (
+    fused_experts, fused_experts_with_all2all, fused_experts_with_allgather,
+    fused_experts_with_mc2)
 
 
 class TestAscendW8A8FusedMoEMethod(TestBase):
