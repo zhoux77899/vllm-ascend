@@ -20,6 +20,7 @@ class TestAscendW8A8FusedMoEMethod(TestBase):
 
     @patch("torch_npu.npu_grouped_matmul_finalize_routing")
     @patch("torch_npu.npu_grouped_matmul_swiglu_quant")
+    @patch("torch.zeros")
     @patch("torch_npu.npu_moe_init_routing_v2")
     @patch("torch_npu.npu_dynamic_quant")
     @patch("torch.distributed.get_world_size")
@@ -32,6 +33,7 @@ class TestAscendW8A8FusedMoEMethod(TestBase):
         mock_get_world_size,
         mock_dynamic_quant,
         mock_moe_init_routing_v2,
+        mock_zeros,
         mock_grouped_matmul_swiglu_quant,
         mock_grouped_matmul_finalize_routing,
     ):
@@ -58,6 +60,8 @@ class TestAscendW8A8FusedMoEMethod(TestBase):
             placeholder_ones,
             self.placeholder,
         )
+        mock_zeros.return_value = torch.zeros((self.num_tokens, self.hidden_size),
+                                              dtype=torch.bfloat16)
         mock_grouped_matmul_swiglu_quant.return_value = (
             placeholder_int8,
             self.placeholder,
