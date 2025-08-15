@@ -4,6 +4,7 @@ import torch
 
 from tests.ut.base import TestBase
 from vllm_ascend.quantization.w4a8_dynamic import (
+    apply_mlp, apply_mlp_decode,
     AscendW4A8DynamicFusedMoEMethod, AscendW4A8DynamicLinearMethod)
 
 
@@ -110,3 +111,68 @@ class TestAscendW4A8DynamicFusedMoEMethod(TestBase):
         self.assertTrue(hasattr(layer, "w2_scale_bias"))
         self.assertEqual(layer.w2_scale_bias.data.shape, (8, 14))
         self.assertEqual(layer.w2_scale_bias.data.dtype, torch.float32)
+
+    @patch("torch_npu.npu_swiglu")
+    @patch("torch_npu.npu_grouped_matmul")
+    @patch("torch_npu.npu_dynamic_quant")
+    def test_apply_mlp(
+        self,
+        mock_dynamic_quant,
+        mock_grouped_matmul,
+        mock_swiglu,
+    ):
+        placeholder = torch.randn(128, 128, dtype=torch.bfloat16)
+        placeholder_int8 = torch.randint(0, 100, (128, 128), dtype=torch.int8)
+        placeholder_ones = torch.ones(128, dtype=torch.int32)
+
+        mock_dynamic_quant.return_value = (
+            placeholder_int8,
+            placeholder_ones,
+        )
+        mock_grouped_matmul.return_value = [placeholder]
+        mock_swiglu.return_value = placeholder
+
+        result = apply_mlp(
+            hidden_states=placeholder,
+            w1=placeholder,
+            w1_scale=placeholder,
+            w2=placeholder,
+            w2_scale=placeholder,
+            group_list=placeholder,
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.dtype, torch.bfloat16)
+
+    @patch("torch_npu.npu_dequant_swiglu_quant")
+    @patch("torch_npu.npu_grouped_matmul")
+    @patch("torch_npu.npu_dynamic_quant")
+    def test_apply_mlp(
+        self,
+        mock_dynamic_quant,
+        mock_grouped_matmul,
+        mock_dequant_swiglu_quant,
+    ):
+        placeholder = torch.randn(128, 128, dtype=torch.bfloat16)
+        placeholder_int8 = torch.randint(0, 100, (128, 128), dtype=torch.int8)
+        placeholder_ones = torch.ones(128, dtype=torch.int32)
+
+        mock_dynamic_quant.return_value = (
+            placeholder_int8,
+            placeholder_ones,
+        )
+        mock_grouped_matmul.return_value = [placeholder]
+        mock_dequant_swiglu_quant.return_value = (
+            placeholder_int8,
+            placeholder_ones,
+        )
+
+        result = apply_mlp_decode(
+            hidden_states=placeholder,
+            w1=placeholder,
+            w1_scale=placeholder,
+            w2=placeholder,
+            w2_scale=placeholder,
+            group_list=placeholder,
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.dtype, torch.bfloat16)
