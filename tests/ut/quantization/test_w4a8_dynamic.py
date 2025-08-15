@@ -4,8 +4,8 @@ import torch
 
 from tests.ut.base import TestBase
 from vllm_ascend.quantization.w4a8_dynamic import (
-    apply_mlp, apply_mlp_decode,
-    AscendW4A8DynamicFusedMoEMethod, AscendW4A8DynamicLinearMethod)
+    AscendW4A8DynamicFusedMoEMethod, AscendW4A8DynamicLinearMethod, apply_mlp,
+    apply_mlp_decode)
 
 
 class TestAscendW4A8DynamicLinearMethod(TestBase):
@@ -146,7 +146,7 @@ class TestAscendW4A8DynamicFusedMoEMethod(TestBase):
     @patch("torch_npu.npu_dequant_swiglu_quant")
     @patch("torch_npu.npu_grouped_matmul")
     @patch("torch_npu.npu_dynamic_quant")
-    def test_apply_mlp(
+    def test_apply_mlp_decode(
         self,
         mock_dynamic_quant,
         mock_grouped_matmul,
