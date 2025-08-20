@@ -108,8 +108,8 @@ class TestAscendW4A8DynamicFusedMoEMethod(TestBase):
     @patch('torch_npu.npu_format_cast_')
     @patch('torch_npu.npu_quantize')
     @patch('torch.Tensor.npu')
-
-    def test_process_weights_after_loading(self, mock_npu, mock_npu_quantize):
+    def test_process_weights_after_loading(self, mock_npu_format_cast, mock_npu,
+                                           mock_npu_quantize):
         # old quant version weight
         layer = torch.nn.Module()
         layer.w13_weight = torch.nn.Parameter(torch.zeros(
