@@ -4,8 +4,8 @@ import torch
 import torch.distributed as dist
 import torch_npu
 from torch.nn.functional import pad
-
 from vllm.distributed import GroupCoordinator, get_ep_group
+
 from vllm_ascend.distributed.parallel_state import get_mc2_group
 from vllm_ascend.torchair.utils import npu_stream_switch, npu_wait_tensor
 from vllm_ascend.utils import (AscendSocVersion, dispose_tensor,
@@ -13,8 +13,8 @@ from vllm_ascend.utils import (AscendSocVersion, dispose_tensor,
 
 
 def dynamic_quant(
-    hidden_states: torch.Tensor,
-    dynamic_scale: torch.Tensor = None
+        hidden_states: torch.Tensor,
+        dynamic_scale: torch.Tensor = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     if dynamic_scale is None:
         unquantized_hidden_states = hidden_states
