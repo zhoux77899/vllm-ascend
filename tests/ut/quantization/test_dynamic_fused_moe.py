@@ -3,12 +3,12 @@ from unittest.mock import MagicMock, patch
 import torch
 
 from tests.ut.base import TestBase
-from vllm_ascend.quantization.dynamic_fused_moe import (apply_mlp, apply_mlp_decode,
-    fused_experts, fused_experts_with_all2all, fused_experts_with_allgather,
-    fused_experts_with_mc2)
+from vllm_ascend.quantization.dynamic_fused_moe import (
+    apply_mlp, apply_mlp_decode, fused_experts, fused_experts_with_all2all,
+    fused_experts_with_allgather, fused_experts_with_mc2)
 
 
-class TestAscendW8A8FusedMoEMethod(TestBase):
+class TestDynamicFusedMoEMethod(TestBase):
 
     def setUp(self):
         self.hidden_size = 128
@@ -17,10 +17,8 @@ class TestAscendW8A8FusedMoEMethod(TestBase):
         self.placeholder = torch.randn(self.num_tokens,
                                        self.hidden_size,
                                        dtype=torch.bfloat16)
-        self.placeholder_int8 = torch.randint(0,
-                                         100,
-                                         (self.num_tokens, self.hidden_size),
-                                         dtype=torch.int8)
+        self.placeholder_int8 = torch.randint(
+            0, 100, (self.num_tokens, self.hidden_size), dtype=torch.int8)
         self.placeholder_ones = torch.ones(self.num_tokens, dtype=torch.int32)
 
     @patch("torch_npu.npu_swiglu")
@@ -218,7 +216,8 @@ class TestAscendW8A8FusedMoEMethod(TestBase):
             self.placeholder_ones,
             self.placeholder_ones,
         )
-        mock_moe_re_routing.return_value = (self.placeholder_int8, self.placeholder,
+        mock_moe_re_routing.return_value = (self.placeholder_int8,
+                                            self.placeholder,
                                             torch.randint(0,
                                                           100,
                                                           (self.num_tokens, ),

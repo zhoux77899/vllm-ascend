@@ -3,7 +3,8 @@ from unittest.mock import Mock, patch
 import torch
 
 from tests.ut.base import TestBase
-from vllm_ascend.quantization.w8a8_dynamic import AscendW8A8DynamicFusedMoEMethod
+from vllm_ascend.quantization.w8a8_dynamic import \
+    AscendW8A8DynamicFusedMoEMethod
 
 
 class TestAscendW8A8FusedMoEMethod(TestBase):
@@ -26,7 +27,7 @@ class TestAscendW8A8FusedMoEMethod(TestBase):
         mock_get_mc2_group.return_value = mock_mc2_group
         mock_rank = Mock()
         mock_get_rank.return_value = mock_rank
-        
+
         self.quant_method = AscendW8A8DynamicFusedMoEMethod()
 
     def test_get_weight(self):
@@ -35,14 +36,14 @@ class TestAscendW8A8FusedMoEMethod(TestBase):
                                                   self.hidden_size,
                                                   torch.bfloat16)
         self.assertEqual(param_dict["w13_weight"].dtype, torch.int8)
-        self.assertEqual(param_dict["w13_weight"].shape,
-                         (self.num_experts, 2 * self.intermediate_size, self.hidden_size))
+        self.assertEqual(
+            param_dict["w13_weight"].shape,
+            (self.num_experts, 2 * self.intermediate_size, self.hidden_size))
 
     def test_get_dynamic_quant_param(self):
-        param_dict = self.quant_method.get_dynamic_quant_param(self.num_experts,
-                                                               self.intermediate_size,
-                                                               self.hidden_size,
-                                                               torch.bfloat16)
+        param_dict = self.quant_method.get_dynamic_quant_param(
+            self.num_experts, self.intermediate_size, self.hidden_size,
+            torch.bfloat16)
         self.assertEqual(param_dict["w13_weight_scale"].dtype, torch.bfloat16)
         self.assertEqual(param_dict["w13_weight_scale"].shape,
                          (self.num_experts, 2 * self.intermediate_size, 1))
