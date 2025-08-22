@@ -85,7 +85,7 @@ class TestDynamicFusedMoEMethod(TestBase):
     @patch("torch_npu.npu_dynamic_quant")
     @patch("torch.distributed.get_world_size")
     @patch("torch.distributed.get_rank")
-    @patch("vllm_ascend.quantization.w8a8_dynamic.get_ep_group")
+    @patch("vllm_ascend.quantization.dynamic_fused_moe.get_ep_group")
     def test_fused_experts_with_allgather(
         self,
         mock_get_ep_group,
@@ -143,8 +143,8 @@ class TestDynamicFusedMoEMethod(TestBase):
     @patch("torch_npu.npu_grouped_matmul")
     @patch("torch_npu.npu_grouped_matmul_swiglu_quant")
     @patch("torch_npu.npu_moe_distribute_dispatch_v2", create=True)
-    @patch("vllm_ascend.quantization.w8a8_dynamic.get_ascend_soc_version")
-    @patch("vllm_ascend.quantization.w8a8_dynamic.get_mc2_group")
+    @patch("vllm_ascend.quantization.dynamic_fused_moe.get_ascend_soc_version")
+    @patch("vllm_ascend.quantization.dynamic_fused_moe.get_mc2_group")
     def test_fused_experts_with_mc2(
         self,
         mock_get_mc2_group,
