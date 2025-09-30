@@ -17,17 +17,18 @@
 
 **镜像版本：** quay.io/ascend/vllm-ascend:v0.9.0-dsv3.2
 
-**驱动版本：** Ascend HDK 25.2.1 
+**驱动版本：** Ascend HDK 25.2.1
 `npu-smi info` 检查Ascend NPU固件和驱动是否正确安装。
 下载链接：https://support.huawei.com/enterprise/zh/ascend-computing/ascend-hdk-pid-252764743/software/266220744?idAbsPath=fixnode01|23710424|251366513|254884019|261408772|252764743
 
-**网络状态检查：** 
+**网络状态检查：**
 1、使用ssh命令确认机器互连。
 2、服务机器ROCE面联通
 
 ## 模型准备
 
-权重下载，请用户自行到huggingface或者modelscope等下载对应权重，本地权重路径与下文中 omni_infer_server_template_a3_ds.yml的配置模型文件路径保持一致，默认/data/models/origin/bf16
+下载BF16类型的权重，本地权重路径与下文中 omni_infer_server_template_a3_ds.yml的配置模型文件路径保持一致，默认/data/models/origin/bf16
+下载链接：https://e-share.obs-website.cn-north-1.myhuaweicloud.com?v2token=FfDzf0gHJPz/PdVatBwb7F7H2j6Die2gVYaeapdvZcigttwZf9fyl1LBfT3jcsF7J6Ep2ToXhZhBynNte0Gm5unFnaXR64JNcZuOlf+fgWzdN4KIAnO4YL4ESkBpAS946TNgC2XgYwaqWcQ2wg3vkiIJi0gJZuFfcYJ8oiOzM1GYPPnt1egSQk4xh7DiIoKZa9lRLuHPnhEMrI14LVDtXJnj/vC48WZDrNoqAIxerflBlTAj+OCCrQ+bWBV9Z8X9VOxW6gmpOOCnsf1BP051pCi0ip2clPeNiSCWD/ZgafGd8XUhlN1xagY1JnMY3kidc8glPjgL7fmUwBj5YhH9aQVRan6sTVOqUnXZ5bEClZMsHGxLj8/sCyb6o7ey0EmxCxztW9+STJW2gLCCYoRQ5h8VuTrXBP2tvVderVToLBYUHkWEGlPELxMSHSCFsFQj3Tl900f+JoaZ206a/pMFV1M5kCFQsvjQdunpvxpjiB/0aH/K8F4c0RAgCrK4mlhkS+1T0csAfNn+gEptiL8c31ge/+pzfKaUwffQvEXNFeklAFsjNdBqRW6BMf0NXbOGXcCt7+gQKQuupJTXJJtjF/09v5EeVVh3XQOdrxeKUbf+61cCjR/iJHJs95PcK5kIyHXEvbE6KsbSGheLaTgxhwQU/r0xpFNPqFvhaqeX7uK5iT0+k5iDnPovvPZrsy9+MN8tR5kNJd1a87Zr7mUwNj9zZkhwuK7wkEZYHhjDor2dYg81irMsIGG4Lr2gGv1O6tiJ6sc+8HKEBHvVswPUfbJApo65qgCzc0q1xYzHUpCtotc6KcwPZKQLprCgVUWIEjBPTkG9tDvHwTROkZ2KEc+fzntCLgjF9ti8UO9reHnLK6ruNObw4nLxNRhoI5pwF6XxL89R0hxmQ11mFOp5aWJDUyjyaG1JeHSBMLEyJg8=_PGnD+QhM5RtsJfHhDUfgjRJ56mmGB9w9XQt5ygMocEU=_UM8SeuKCksXKNdgzUFSS9Q== 提取码：bf16-origin
 
 ## 部署
 
@@ -48,6 +49,9 @@ yum install libselinux-python3
 ### 修改配置文件
 
 以1P1D为例(4机组P,4机组D)，需要修改`omni_infer_server_template_a3_ds.yml`和 `omni_infer_inventory_used_for_1P32_1D32.yml` 两处配置文件，
+文件获取地址:
+https://github.com/vllm-project/vllm-ascend/blob/v0.9.1-dev/examples/omni_infer_server_template_a3_ds.yml
+https://github.com/vllm-project/vllm-ascend/blob/v0.9.1-dev/examples/omni_infer_inventory_used_for_1P32_1D32.yml
 
 1. **omni_infer_inventory_used_for_1P32_1D32.yml**
 
@@ -97,19 +101,20 @@ yum install libselinux-python3
          c0:
            ansible_host: "127.0.0.1"  # C0 节点的IP，即 Global Proxy 节点
            ...
-  ```
+    ```
 
-生成私钥文件。将`ansible_ssh_private_key_file:`修改为私钥文件路径：
-```bash
-# 首先在执行机生成密钥对:
-ssh-keygen -t ed25519 -C "Your SSH key comment" -f ~/.ssh/my_key  # -t 指定密钥类型（推荐ed25519）， -f 指定文件名
-# 密钥文件默认存放位置为: 私钥：~/.ssh/id_ed25519 公钥：~/.ssh/id_ed25519.pub. 设置密钥文件权限:
-chmod 700 ~/.ssh
-chmod 600 ~/.ssh/my_key   # 私钥必须设为 600
-chmod 644 ~/.ssh/my_key.pub
-# 部署公钥到远程目标机:以下例子是通过密码去传输密钥文件到远程目标机
-ssh-copy-id -i ~/.ssh/my_key.pub user@remote-host
-```
+  生成私钥文件。将ansible_ssh_private_key_file:修改为私钥文件路径：
+
+  ```bash
+  # 首先在执行机生成密钥对:
+  ssh-keygen -t ed25519 -C "Your SSH key comment" -f ~/.ssh/my_key  # -t 指定密钥类型（推荐ed25519）， -f 指定文件名
+  # 密钥文件默认存放位置为: 私钥：~/.ssh/id_ed25519 公钥：~/.ssh/id_ed25519.pub. 设置密钥文件权限:
+  chmod 700 ~/.ssh
+  chmod 600 ~/.ssh/my_key   # 私钥必须设为 600
+  chmod 644 ~/.ssh/my_key.pub
+  # 部署公钥到远程目标机:以下例子是通过密码去传输密钥文件到远程目标机
+  ssh-copy-id -i ~/.ssh/my_key.pub user@remote-host
+  ```
 
 
 2. **omni_infer_server_template_a3_ds.yml**
