@@ -16,6 +16,7 @@
 #
 
 import math
+from functools import lru_cache
 from typing import Optional, Tuple
 
 import torch
@@ -31,6 +32,7 @@ from vllm_ascend.utils import (AscendSocVersion, enable_custom_op,
                                get_ascend_soc_version, is_310p)
 
 
+@lru_cache(maxsize=128)
 def maybe_exceed_ub_size(q_n: int, k_n: int, dtype: torch.dtype,
                          soc_version: AscendSocVersion) -> bool:
     if soc_version not in {AscendSocVersion.A2, AscendSocVersion.A3}:
@@ -98,6 +100,7 @@ def _rope_forward_oot(
                 soc_version=get_ascend_soc_version(),
         ):
             query = query.contiguous().view(1, query.shape[0], -1,
+                                            
                                             self.head_size)
             key = key.contiguous().view(1, key.shape[0], -1, self.head_size)
             torch_npu.npu_apply_rotary_pos_emb(query, key, self.cos, self.sin)
