@@ -89,18 +89,17 @@ def _rope_forward_oot(
     if self.cos is not None and self.sin is not None:
         # If cos and sin are generated outside, use npu_apply_rotary_pos_emb to avoid redundant calculation.
         # This method requires head_size and rotary_dim equal 128 and neox_style is True
-        query = query.contiguous().view(1, query.shape[0], -1,
-                                        self.head_size)
-        key = key.contiguous().view(1, key.shape[0], -1, self.head_size)
-        if maybe_exceed_ub_size(
-            q_n=query.shape[2],
-            k_n=key.shape[2],
+        query_head_num = query.numel() // (query.shape[0] * self.head_size)
+        key_head_num = key.numel() // (key.shape[0] * self.head_size)
+        if not maybe_exceed_ub_size(
+            q_n=query_head_num,
+            k_n=key_head_num,
             dtype=query.dtype,
             soc_version=get_ascend_soc_version(),
         ):
-            query = query.view(query_shape)
-            key = key.view(key_shape)
-        else:
+            query = query.contiguous().view(1, query.shape[0], -1,
+                                            self.head_size)
+            key = key.contiguous().view(1, key.shape[0], -1, self.head_size)
             torch_npu.npu_apply_rotary_pos_emb(query, key, self.cos, self.sin)
             return query.view(query_shape), key.view(key_shape)
 
