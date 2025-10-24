@@ -100,7 +100,6 @@ def _rope_forward_oot(
                 soc_version=get_ascend_soc_version(),
         ):
             query = query.contiguous().view(1, query.shape[0], -1,
-                                            
                                             self.head_size)
             key = key.contiguous().view(1, key.shape[0], -1, self.head_size)
             torch_npu.npu_apply_rotary_pos_emb(query, key, self.cos, self.sin)
