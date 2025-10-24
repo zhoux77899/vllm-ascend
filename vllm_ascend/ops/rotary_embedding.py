@@ -92,10 +92,10 @@ def _rope_forward_oot(
         query_head_num = query.numel() // (query.shape[0] * self.head_size)
         key_head_num = key.numel() // (key.shape[0] * self.head_size)
         if not maybe_exceed_ub_size(
-            q_n=query_head_num,
-            k_n=key_head_num,
-            dtype=query.dtype,
-            soc_version=get_ascend_soc_version(),
+                q_n=query_head_num,
+                k_n=key_head_num,
+                dtype=query.dtype,
+                soc_version=get_ascend_soc_version(),
         ):
             query = query.contiguous().view(1, query.shape[0], -1,
                                             self.head_size)
