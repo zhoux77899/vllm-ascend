@@ -36,9 +36,13 @@ from vllm_ascend.utils import (AscendDeviceType, enable_custom_op,
 @lru_cache(maxsize=128)
 def maybe_exceed_ub_size(q_n: int, k_n: int, dtype: torch.dtype,
                          ascend_device_type: AscendDeviceType) -> bool:
-    if ascend_device_type in {AscendDeviceType._910B, AscendDeviceType._910_93}:
+    if ascend_device_type in {
+            AscendDeviceType._910B, AscendDeviceType._910_93
+    }:
         ub_size = 192 * 1024
-    elif ascend_device_type in {AscendDeviceType._310P, AscendDeviceType._910_95}:
+    elif ascend_device_type in {
+            AscendDeviceType._310P, AscendDeviceType._910_95
+    }:
         ub_size = 248 * 1024
     else:
         logger.warning(
