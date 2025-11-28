@@ -35,8 +35,12 @@ from vllm_ascend.utils import (AscendDeviceType, enable_custom_op,
 
 @lru_cache(maxsize=128)
 def maybe_exceed_ub_size(q_n: int, k_n: int, dtype: torch.dtype,
-                         soc_version: AscendSocVersion) -> bool:
-    if soc_version not in {AscendSocVersion.A2, AscendSocVersion.A3}:
+                         ascend_device_type: AscendDeviceType) -> bool:
+    if ascend_device_type in {AscendDeviceType._910B, AscendDeviceType._910_93}:
+        ub_size = 192 * 1024
+    elif ascend_device_type in {AscendDeviceType._310P, AscendDeviceType._910_95}:
+        ub_size = 248 * 1024
+    else:
         logger.warning(
             "Cannot get correct UB size, may fail to run rotary_embedding")
         return False
@@ -46,7 +50,6 @@ def maybe_exceed_ub_size(q_n: int, k_n: int, dtype: torch.dtype,
     ub_required = (q_n + k_n) * 128 * cast_size * 2 + 128 * dtype_size * 4 + (
         q_n + k_n) * 128 * cast_size + (
             q_n + k_n) * 128 * cast_size * 2 + cast * 128 * 4 * 2
-    ub_size = 192 * 1024
     return ub_required > ub_size
 
 
@@ -99,7 +102,7 @@ def _rope_forward_oot(
                 q_n=query_head_num,
                 k_n=key_head_num,
                 dtype=query.dtype,
-                soc_version=get_ascend_soc_version(),
+                ascend_device_type=get_ascend_device_type(),
         ):
             query = query.contiguous().view(1, query.shape[0], -1,
                                             self.head_size)
