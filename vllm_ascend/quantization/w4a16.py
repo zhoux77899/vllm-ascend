@@ -32,7 +32,7 @@ def get_quant_description(
     weight_quant: QuantizationArgs,
 ) -> Dict[str, Any]:
     quant_method = vllm_config.quant_config.quant_description.get(
-        "quant_method": "ascend")
+        "quant_method", "ascend")
 
     if quant_method == "ascend":
         return vllm_config.quant_config.quant_description
@@ -200,12 +200,12 @@ class AscendW4A16FusedMoEMethod:
             param_dict["w2_weight_offset"] = torch.zeros(1,
                                                          dtype=torch.bfloat16)
         else:
-            param_dict["w13_weight_offset"] = torch.zeros(
+            param_dict["w13_weight_offset"] = torch.empty(
                 num_experts,
                 2 * intermediate_size_per_partition,
                 hidden_sizes // self.group_size,
                 dtype=torch.bfloat16)
-            param_dict["w2_weight_offset"] = torch.zeros(
+            param_dict["w2_weight_offset"] = torch.empty(
                 num_experts,
                 hidden_sizes,
                 intermediate_size_per_partition // self.group_size,
@@ -309,7 +309,7 @@ class AscendW4A16FusedMoEMethod:
             layer.w2_weight_scale.data = layer.w2_weight_scale.data.transpose(
                 1, 2).contiguous()
 
-            if self.symmetric:
+            if not self.symmetric:
                 layer.w13_weight_offset.data = layer.w13_weight_offset.data.transpose(
                     1, 2).contiguous()
                 layer.w2_weight_offset.data = layer.w2_weight_offset.data.transpose(
