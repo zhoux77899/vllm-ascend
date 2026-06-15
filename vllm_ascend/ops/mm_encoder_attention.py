@@ -15,6 +15,15 @@
 # limitations under the License.
 #
 
+"""Ascend implementation of upstream :class:`MMEncoderAttention`.
+
+Eager path calls functional FIA; ACL-graph capture records ``.out`` FIA tasks
+with ``graph_task_group_begin/end``, matching the LLM pattern in
+:mod:`vllm_ascend.attention.attention_v1`.
+"""
+
+from __future__ import annotations
+
 import einops
 import numpy as np
 import torch
@@ -23,8 +32,15 @@ import torch_npu
 from vllm.model_executor.layers.attention.mm_encoder_attention import MMEncoderAttention  # type: ignore
 from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
-MIN_PAD_SIZE: int = 64  # min_size to pad weight
-MAX_PAD_SIZE: int = 128  # max_size to pad weight
+from vllm_ascend.utils import weak_ref_tensors
+from vllm_ascend.worker.encoder_acl_graph import (
+    get_encoder_graph_params,
+    get_encoder_graph_runtime_state,
+    update_encoder_graph_workspace,
+)
+
+MIN_PAD_SIZE: int = 64
+MAX_PAD_SIZE: int = 128
 SWA_INT_MAX: int = 2147483647
 FIA_BLOCK_SIZE: int = 128
 
@@ -38,16 +54,6 @@ class AscendMMEncoderAttention(MMEncoderAttention):
         num_kv_heads: int | None = None,
         prefix: str = "",
     ) -> None:
-        """
-        Args:
-            num_heads: number of attention heads per partition.
-            head_size: hidden_size per attention head.
-            scale: scale factor.
-            num_kv_heads: number of kv heads.
-            prefix: This has no effect, it is only here to make it easier to
-                    swap between Attention and MMEncoderAttention.
-            multimodal_config: configs for multi-modal.
-        """
         super().__init__(
             num_heads=num_heads,
             head_size=head_size,
@@ -59,6 +65,9 @@ class AscendMMEncoderAttention(MMEncoderAttention):
         self.enable_pad = self.head_size > MIN_PAD_SIZE and self.head_size < MAX_PAD_SIZE
         self.scale_value = self.head_size**-0.5
 
+    def ascend_attn_scale(self) -> float:
+        return float(self.scale) if self.scale is not None else self.scale_value
+
     @classmethod
     def maybe_compute_seq_lens(
         cls,
@@ -66,11 +75,10 @@ class AscendMMEncoderAttention(MMEncoderAttention):
         cu_seqlens: np.ndarray,
         device: torch.device,
     ) -> np.ndarray | None:
-        """Upstream contract helper for ``prepare_encoder_metadata``.
+        """Returns per-sequence lengths on CPU for ``prepare_encoder_metadata``.
 
-        Returns per-sequence lengths on CPU. FIA uses cumulative
-        ``actual_seq_lengths`` computed in ``forward_oot`` via
-        ``_get_vit_fia_params``.
+        FIA uses cumulative ``actual_seq_lengths`` computed in ``forward_oot``
+        via ``get_vit_fia_params``.
         """
         if cu_seqlens is None:
             return None
@@ -80,7 +88,7 @@ class AscendMMEncoderAttention(MMEncoderAttention):
 
         return seq_lens
 
-    def _reshape_qkv_to_3d(
+    def reshape_qkv_to_3d(
         self,
         query: torch.Tensor,
         key: torch.Tensor,
@@ -89,22 +97,17 @@ class AscendMMEncoderAttention(MMEncoderAttention):
         q_len: int,
         kv_len: int,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Reshape query, key, value to 3D tensors:
-        (batch_size * seq_len, num_heads, head_size)
-        """
         query = query.view(bsz * q_len, self.num_heads, self.head_size)
         key = key.view(bsz * kv_len, self.num_kv_heads, self.head_size)
         value = value.view(bsz * kv_len, self.num_kv_heads, self.head_size)
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
         if (num_repeat := self.num_queries_per_kv) > 1:
-            # Handle MQA and GQA
             key = torch.repeat_interleave(key, num_repeat, dim=1)
             value = torch.repeat_interleave(value, num_repeat, dim=1)
 
         return query, key, value
 
-    def _maybe_compute_cu_seqlens(
+    def maybe_compute_cu_seqlens(
         self,
         bsz: int,
         q_len: int,
@@ -115,13 +118,10 @@ class AscendMMEncoderAttention(MMEncoderAttention):
                 cu_seqlens = cu_seqlens.to("cpu")
             return cu_seqlens
 
-        # If cu_seqlens is not provided, we create a default one assuming all sequences have the same length.
-        # This is used by models such as Hunyuan-OCR, which always pass None as cu_seqlens and rely on the operator to
-        # compute it internally.
         cu_seqlens = torch.arange(0, (bsz + 1) * q_len, step=q_len, dtype=torch.int32, device="cpu")
         return cu_seqlens
 
-    def _maybe_compute_actual_seq_lengths(
+    def maybe_compute_actual_seq_lengths(
         self,
         bsz: int,
         q_len: int,
@@ -135,12 +135,12 @@ class AscendMMEncoderAttention(MMEncoderAttention):
                 seq_lens_cpu = seq_lens_cpu.to("cpu")
             actual = seq_lens_cpu.cumsum(0).to(torch.int64).tolist()
         else:
-            cu = self._maybe_compute_cu_seqlens(bsz, q_len, cu_seqlens)
+            cu = self.maybe_compute_cu_seqlens(bsz, q_len, cu_seqlens)
             actual = cu[1:].to(torch.int64).tolist()
 
         return actual, actual
 
-    def _get_vit_fia_params(
+    def get_vit_fia_params(
         self,
         bsz: int,
         q_len: int,
@@ -157,12 +157,8 @@ class AscendMMEncoderAttention(MMEncoderAttention):
         int,
         int,
     ]:
-        """Build FIA inputs for dense ViT (PrefillNoCache + non-causal).
-
-        Stage 1 uses fixed dense constants; Stage 2 capture/replay will reuse
-        this helper as the single source of FIA metadata.
-        """
-        actual_seq_lengths, actual_seq_lengths_kv = self._maybe_compute_actual_seq_lengths(
+        """Build FIA metadata for dense ViT (PrefillNoCache + non-causal)."""
+        actual_seq_lengths, actual_seq_lengths_kv = self.maybe_compute_actual_seq_lengths(
             bsz, q_len, cu_seqlens, sequence_lengths
         )
         return (
@@ -177,20 +173,7 @@ class AscendMMEncoderAttention(MMEncoderAttention):
             SWA_INT_MAX,
         )
 
-    def forward_oot(
-        self,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        cu_seqlens: torch.Tensor | None = None,
-        max_seqlen: torch.Tensor | None = None,  # kept for upstream sig parity
-        sequence_lengths: torch.Tensor | None = None,
-    ):
-        return self._forward_eager_fia(
-            query, key, value, cu_seqlens, max_seqlen, sequence_lengths
-        )
-
-    def _forward_eager_fia(
+    def forward_eager_vit_fia(
         self,
         query: torch.Tensor,
         key: torch.Tensor,
@@ -198,7 +181,7 @@ class AscendMMEncoderAttention(MMEncoderAttention):
         cu_seqlens: torch.Tensor | None = None,
         max_seqlen: torch.Tensor | None = None,
         sequence_lengths: torch.Tensor | None = None,
-    ):
+    ) -> torch.Tensor:
         bsz, q_len = query.size()[:2]
         kv_len = key.size(1)
         is_reshaped = query.dim() == 4
@@ -213,15 +196,13 @@ class AscendMMEncoderAttention(MMEncoderAttention):
             attn_mask,
             pre_tokens,
             next_tokens,
-        ) = self._get_vit_fia_params(bsz, q_len, cu_seqlens, sequence_lengths)
+        ) = self.get_vit_fia_params(bsz, q_len, cu_seqlens, sequence_lengths)
 
-        # q, k, v: [b, s, head, head_dim] -> [b * s, head, head_dim]
-        q, k, v = self._reshape_qkv_to_3d(query, key, value, bsz, q_len, kv_len)
+        q, k, v = self.reshape_qkv_to_3d(query, key, value, bsz, q_len, kv_len)
 
         origin_head_dim = q.shape[-1]
         if self.enable_pad:
             pad_len = MAX_PAD_SIZE - origin_head_dim
-            # [b * s, head, head_dim] -> [b * s, head, MAX_PAD_SIZE]
             q = F.pad(q, (0, pad_len), mode="constant", value=0)
             k = F.pad(k, (0, pad_len), mode="constant", value=0)
             v = F.pad(v, (0, pad_len), mode="constant", value=0)
@@ -238,7 +219,7 @@ class AscendMMEncoderAttention(MMEncoderAttention):
             actual_seq_lengths_kv=actual_seq_lengths_kv,
             num_key_value_heads=self.num_kv_heads,
             num_heads=self.num_heads,
-            scale=self.scale_value,
+            scale=self.ascend_attn_scale(),
             sparse_mode=sparse_mode,
             pre_tokens=pre_tokens,
             next_tokens=next_tokens,
@@ -252,3 +233,155 @@ class AscendMMEncoderAttention(MMEncoderAttention):
         else:
             context_layer = einops.rearrange(context_layer, "(b s) h d -> b s (h d)", b=bsz).contiguous()
         return context_layer
+
+    def full_graph_vit_fia(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        cu_seqlens: torch.Tensor | None = None,
+        max_seqlen: torch.Tensor | None = None,
+        sequence_lengths: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        runtime = get_encoder_graph_runtime_state()
+        token_budget = runtime.token_budget
+        params = get_encoder_graph_params()
+        if token_budget is None or params is None:
+            raise RuntimeError("Encoder graph capture state was not initialized (missing token_budget).")
+
+        bsz, q_len = query.size()[:2]
+        kv_len = key.size(1)
+        is_reshaped = query.dim() == 4
+
+        (
+            actual_seq_lengths,
+            actual_seq_lengths_kv,
+            block_size,
+            block_table,
+            input_layout,
+            sparse_mode,
+            attn_mask,
+            pre_tokens,
+            next_tokens,
+        ) = self.get_vit_fia_params(bsz, q_len, cu_seqlens, sequence_lengths)
+
+        q, k, v = self.reshape_qkv_to_3d(query, key, value, bsz, q_len, kv_len)
+
+        origin_head_dim = q.shape[-1]
+        if self.enable_pad:
+            pad_len = MAX_PAD_SIZE - origin_head_dim
+            q = F.pad(q, (0, pad_len), mode="constant", value=0)
+            k = F.pad(k, (0, pad_len), mode="constant", value=0)
+            v = F.pad(v, (0, pad_len), mode="constant", value=0)
+
+        out = torch.empty_like(q)
+        softmax_lse = torch.empty(1, dtype=q.dtype, device=q.device)
+
+        vit_layer_idx = runtime.capture_layer_cursor
+        runtime.capture_layer_cursor = vit_layer_idx + 1
+        uses_sequence_lengths_host = sequence_lengths is not None
+
+        workspace = params.workspaces.get(token_budget)
+        if workspace is None:
+            workspace = torch_npu._npu_fused_infer_attention_score_get_max_workspace(
+                query=q,
+                key=k,
+                value=v,
+                atten_mask=attn_mask,
+                block_table=block_table,
+                input_layout=input_layout,
+                block_size=block_size,
+                actual_seq_lengths=actual_seq_lengths,
+                actual_seq_lengths_kv=actual_seq_lengths_kv,
+                num_key_value_heads=self.num_kv_heads,
+                num_heads=self.num_heads,
+                sparse_mode=sparse_mode,
+                pre_tokens=pre_tokens,
+                next_tokens=next_tokens,
+                scale=self.ascend_attn_scale(),
+            )
+            update_encoder_graph_workspace(token_budget, workspace)
+
+        stream = torch_npu.npu.current_stream()
+        event = torch.npu.ExternalEvent()
+        event.wait(stream)
+        event.reset(stream)
+        params.events[token_budget].append(event)
+
+        packed = (
+            weak_ref_tensors(q),
+            weak_ref_tensors(k),
+            weak_ref_tensors(v),
+            block_table,
+            attn_mask,
+            block_size,
+            uses_sequence_lengths_host,
+            vit_layer_idx,
+            self.num_kv_heads,
+            self.num_heads,
+            self.ascend_attn_scale(),
+            weak_ref_tensors(out),
+            weak_ref_tensors(softmax_lse),
+        )
+        params.attn_params[token_budget].append(packed)
+
+        torch.npu.graph_task_group_begin(stream)
+        torch_npu.npu_fused_infer_attention_score.out(
+            query=q,
+            key=k,
+            value=v,
+            atten_mask=attn_mask,
+            block_table=block_table,
+            input_layout=input_layout,
+            block_size=block_size,
+            actual_seq_lengths=actual_seq_lengths,
+            actual_seq_lengths_kv=actual_seq_lengths_kv,
+            num_key_value_heads=self.num_kv_heads,
+            num_heads=self.num_heads,
+            scale=self.ascend_attn_scale(),
+            sparse_mode=sparse_mode,
+            pre_tokens=pre_tokens,
+            next_tokens=next_tokens,
+            workspace=workspace,
+            out=[out, softmax_lse],
+        )
+        handle = torch.npu.graph_task_group_end(stream)
+        params.handles[token_budget].append(handle)
+
+        context_layer = out
+        if self.enable_pad:
+            context_layer = context_layer[..., :origin_head_dim]
+
+        if is_reshaped:
+            context_layer = einops.rearrange(context_layer, "(b s) h d -> b s h d", b=bsz).contiguous()
+        else:
+            context_layer = einops.rearrange(context_layer, "(b s) h d -> b s (h d)", b=bsz).contiguous()
+        return context_layer
+
+    def forward_oot(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        cu_seqlens: torch.Tensor | None = None,
+        max_seqlen: torch.Tensor | None = None,
+        sequence_lengths: torch.Tensor | None = None,
+    ):
+        if get_encoder_graph_runtime_state().capturing:
+            return self.full_graph_vit_fia(
+                query,
+                key,
+                value,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+                sequence_lengths=sequence_lengths,
+            )
+
+        return self.forward_eager_vit_fia(
+            query,
+            key,
+            value,
+            cu_seqlens=cu_seqlens,
+            max_seqlen=max_seqlen,
+            sequence_lengths=sequence_lengths,
+        )
